@@ -39,3 +39,6 @@ lerna-debug.log*
 
 # Build/Config files
 /build
+
+# Uploaded attachments
+/uploads
