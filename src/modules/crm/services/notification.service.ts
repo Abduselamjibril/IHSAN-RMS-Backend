@@ -52,4 +52,13 @@ export class NotificationService {
     await this.createReminder(lead, lead.assignedSalesAgent, new Date(), subject, message);
     console.log(`[NOTIFICATION] ${subject}: ${message}`);
   }
+
+  async completeReminder(id: number): Promise<FollowupReminder> {
+    const reminder = await this.reminderRepo.findOne({ where: { id } });
+    if (!reminder) {
+      throw new Error(`Reminder with ID ${id} not found`);
+    }
+    reminder.isCompleted = true;
+    return this.reminderRepo.save(reminder);
+  }
 }

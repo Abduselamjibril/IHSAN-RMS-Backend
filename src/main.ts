@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as express from 'express';
 import { join } from 'path';
 import * as fs from 'fs';
@@ -24,7 +25,22 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Setup Swagger API documentation
+  const config = new DocumentBuilder()
+    .setTitle('IHSAN REMS API')
+    .setDescription('Real Estate Management System (REMS) API for IHSAN Properties and Business Service PLC')
+    .setVersion('1.0')
+    .addTag('leads', 'Lead Management & CRM')
+    .addTag('agents', 'Sales Agents & Metadata')
+    .addTag('lead-sources', 'Lead Sources Configuration')
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document);
+
   await app.listen(process.env.PORT ?? 3000);
   console.log(`🚀 IHSAN REMS API running on http://localhost:${process.env.PORT ?? 3000}`);
+  console.log(`📖 Swagger API documentation available at http://localhost:${process.env.PORT ?? 3000}/api/docs`);
 }
 bootstrap();
+// Triggering rebuild after database clear
+
