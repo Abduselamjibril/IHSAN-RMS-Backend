@@ -29,36 +29,36 @@ export class Opportunity {
 
   @ManyToOne(() => OpportunityStage, { nullable: true })
   @JoinColumn({ name: 'opportunity_stage_id' })
-  opportunityStage: OpportunityStage;
+  opportunityStage: OpportunityStage | null;
 
   @ManyToOne(() => SalesAgent, { nullable: true })
   @JoinColumn({ name: 'assigned_sales_agent_id' })
-  assignedSalesAgent: SalesAgent;
+  assignedSalesAgent: SalesAgent | null;
 
   @Column({ name: 'estimated_value', type: 'numeric', precision: 18, scale: 2, nullable: true })
-  estimatedValue: number;
+  estimatedValue: number | null;
 
   @Column({ name: 'probability_percent', type: 'numeric', precision: 5, scale: 2, nullable: true })
-  probabilityPercent: number;
+  probabilityPercent: number | null;
 
   @Column({ name: 'expected_close_date', type: 'date', nullable: true })
-  expectedCloseDate: Date;
+  expectedCloseDate: Date | null;
 
   @Column({ name: 'actual_close_date', type: 'date', nullable: true })
-  actualCloseDate: Date;
+  actualCloseDate: Date | null;
 
   @Column({ name: 'is_won', type: 'boolean', nullable: true })
-  isWon: boolean;
+  isWon: boolean | null;
 
   @Column({ name: 'is_lost', type: 'boolean', nullable: true })
-  isLost: boolean;
+  isLost: boolean | null;
 
   @ManyToOne(() => OpportunityLossReason, { nullable: true })
   @JoinColumn({ name: 'loss_reason_id' })
-  lossReason: OpportunityLossReason;
+  lossReason: OpportunityLossReason | null;
 
   @Column({ type: 'text', nullable: true })
-  remarks: string;
+  remarks: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;

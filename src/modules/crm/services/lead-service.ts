@@ -140,6 +140,11 @@ export class LeadService {
       : 'Lead registered successfully in the system.';
     await this.leadActivityRepo.save(act);
 
+    // Trigger assignment notification if sales agent is assigned during creation
+    if (lead.assignedSalesAgent) {
+      await this.notificationService.triggerAssignmentNotification(savedLead, lead.assignedSalesAgent);
+    }
+
     return savedLead;
   }
 

@@ -24,9 +24,12 @@ import { CommunicationAudit } from './entities/communication-audit.entity';
 import { CrmSeederService } from './crm-seeder.service';
 import { LeadService } from './services/lead-service';
 import { NotificationService } from './services/notification.service';
+import { EmailService } from './services/email.service';
+import { OpportunityService } from './services/opportunity.service';
 import { LeadController } from './controllers/lead.controller';
 import { AgentController } from './controllers/agent.controller';
 import { LeadSourceController } from './controllers/lead-source.controller';
+import { OpportunityController } from './controllers/opportunity.controller';
 
 @Module({
   imports: [
@@ -54,8 +57,8 @@ import { LeadSourceController } from './controllers/lead-source.controller';
       CommunicationAudit,
     ]),
   ],
-  controllers: [LeadController, AgentController, LeadSourceController],
-  providers: [CrmSeederService, LeadService, NotificationService],
-  exports: [TypeOrmModule, LeadService, NotificationService],
+  controllers: [LeadController, AgentController, LeadSourceController, OpportunityController],
+  providers: [CrmSeederService, LeadService, NotificationService, EmailService, OpportunityService],
+  exports: [TypeOrmModule, LeadService, NotificationService, EmailService, OpportunityService],
 })
 export class CrmModule {}
