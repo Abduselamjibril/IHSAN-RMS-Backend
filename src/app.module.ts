@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CrmModule } from './modules/crm/crm.module';
+import { PropertiesModule } from './modules/properties/properties.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { CrmModule } from './modules/crm/crm.module';
       isGlobal: true,
     }),
     CrmModule,
+    PropertiesModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({

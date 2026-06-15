@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Body, Param, Query, Res, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -8,6 +9,7 @@ import { CreateLeadDto } from '../dto/create-lead.dto';
 import { UpdateLeadDto } from '../dto/update-lead.dto';
 import { AddActivityDto } from '../dto/add-activity.dto';
 
+@ApiTags('CRM')
 @Controller('api/leads')
 export class LeadController {
   constructor(private readonly leadService: LeadService) {}

@@ -1,8 +1,10 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LeadSource } from '../entities/lead-source.entity';
 
+@ApiTags('CRM')
 @Controller('api/lead-sources')
 export class LeadSourceController {
   constructor(

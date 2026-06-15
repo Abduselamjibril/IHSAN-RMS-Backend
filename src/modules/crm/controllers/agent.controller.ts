@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SalesAgent } from '../entities/sales-agent.entity';
@@ -6,6 +7,7 @@ import { LeadSource } from '../entities/lead-source.entity';
 import { LeadStatus } from '../entities/lead-status.entity';
 import { NotificationService } from '../services/notification.service';
 
+@ApiTags('CRM')
 @Controller('api/agents')
 export class AgentController {
   constructor(
