@@ -6,6 +6,7 @@ import { LeadStatus } from './entities/lead-status.entity';
 import { OpportunityStage } from './entities/opportunity-stage.entity';
 import { OpportunityLossReason } from './entities/opportunity-loss-reason.entity';
 import { CommunicationChannel } from './entities/communication-channel.entity';
+import { SalesAgent } from './entities/sales-agent.entity';
 
 @Injectable()
 export class CrmSeederService implements OnModuleInit {
@@ -22,6 +23,8 @@ export class CrmSeederService implements OnModuleInit {
     private readonly opportunityLossReasonRepo: Repository<OpportunityLossReason>,
     @InjectRepository(CommunicationChannel)
     private readonly communicationChannelRepo: Repository<CommunicationChannel>,
+    @InjectRepository(SalesAgent)
+    private readonly salesAgentRepo: Repository<SalesAgent>,
   ) {}
 
   async onModuleInit() {
@@ -31,7 +34,22 @@ export class CrmSeederService implements OnModuleInit {
     await this.seedOpportunityStages();
     await this.seedOpportunityLossReasons();
     await this.seedCommunicationChannels();
+    await this.seedSalesAgents();
     this.logger.log('CRM lookup seed check completed.');
+  }
+
+  private async seedSalesAgents() {
+    const count = await this.salesAgentRepo.count();
+    if (count === 0) {
+      this.logger.log('Seeding CRM Sales Agents...');
+      const agents = [
+        { fullName: 'Almaz Belay', employeeCode: 'AGT001', phone: '+251911111111', email: 'almaz.belay@ihsanproperties.com', department: 'Sales', isActive: true, joinedAt: new Date() },
+        { fullName: 'Yonas Kebede', employeeCode: 'AGT002', phone: '+251911222222', email: 'yonas.kebede@ihsanproperties.com', department: 'Sales', isActive: true, joinedAt: new Date() },
+        { fullName: 'Selamawit Girma', employeeCode: 'AGT003', phone: '+251911333333', email: 'selamawit.girma@ihsanproperties.com', department: 'Marketing', isActive: true, joinedAt: new Date() },
+      ];
+      await this.salesAgentRepo.save(agents);
+      this.logger.log(`Seeded ${agents.length} Sales Agents.`);
+    }
   }
 
   private async seedLeadSources() {
@@ -122,3 +140,4 @@ export class CrmSeederService implements OnModuleInit {
     }
   }
 }
+

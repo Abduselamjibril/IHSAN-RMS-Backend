@@ -140,6 +140,11 @@ export class LeadService {
       : 'Lead registered successfully in the system.';
     await this.leadActivityRepo.save(act);
 
+    // Trigger assignment notification if sales agent is assigned during creation
+    if (lead.assignedSalesAgent) {
+      await this.notificationService.triggerAssignmentNotification(savedLead, lead.assignedSalesAgent);
+    }
+
     return savedLead;
   }
 
@@ -598,4 +603,73 @@ export class LeadService {
       })),
     };
   }
+
+  async addNote(id: number, noteContent: string): Promise<LeadNote> {
+    const lead = await this.leadRepo.findOne({ where: { id, isDeleted: false } });
+    if (!lead) {
+      throw new NotFoundException(`Lead with ID ${id} not found`);
+    }
+    const note = new LeadNote();
+    note.lead = lead;
+    note.note = noteContent;
+    note.isInternal = true;
+    return this.leadNoteRepo.save(note);
+  }
+
+  async findAllNotes(query: any): Promise<{ data: LeadNote[]; total: number }> {
+    const queryBuilder = this.leadNoteRepo.createQueryBuilder('note')
+      .leftJoinAndSelect('note.lead', 'lead')
+      .orderBy('note.createdAt', 'DESC');
+
+    if (query.search) {
+      queryBuilder.andWhere('(note.note ILIKE :search OR lead.fullName ILIKE :search)', { search: `%${query.search}%` });
+    }
+
+    if (query.leadId) {
+      queryBuilder.andWhere('lead.id = :leadId', { leadId: +query.leadId });
+    }
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+    return { data, total };
+  }
+
+  async findAllAttachments(query: any): Promise<{ data: CommunicationAttachment[]; total: number }> {
+    const queryBuilder = this.attachmentRepo.createQueryBuilder('attachment')
+      .leftJoinAndSelect('attachment.communication', 'communication')
+      .leftJoinAndSelect('communication.lead', 'lead')
+      .orderBy('attachment.uploadedAt', 'DESC');
+
+    if (query.search) {
+      queryBuilder.andWhere('(attachment.fileName ILIKE :search OR lead.fullName ILIKE :search)', { search: `%${query.search}%` });
+    }
+
+    if (query.leadId) {
+      queryBuilder.andWhere('lead.id = :leadId', { leadId: +query.leadId });
+    }
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+    return { data, total };
+  }
+
+  async findAllActivities(query: any): Promise<{ data: LeadActivity[]; total: number }> {
+    const queryBuilder = this.leadActivityRepo.createQueryBuilder('activity')
+      .leftJoinAndSelect('activity.lead', 'lead')
+      .orderBy('activity.activityDate', 'DESC');
+
+    if (query.search) {
+      queryBuilder.andWhere('(activity.subject ILIKE :search OR activity.description ILIKE :search OR lead.fullName ILIKE :search)', { search: `%${query.search}%` });
+    }
+
+    if (query.leadId) {
+      queryBuilder.andWhere('lead.id = :leadId', { leadId: +query.leadId });
+    }
+
+    if (query.activityType && query.activityType !== 'all') {
+      queryBuilder.andWhere('activity.activityType = :activityType', { activityType: query.activityType });
+    }
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+    return { data, total };
+  }
 }
+
