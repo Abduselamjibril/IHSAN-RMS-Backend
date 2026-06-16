@@ -7,10 +7,13 @@ import {
   ManyToOne,
   JoinColumn,
   Index,
+  ManyToMany,
+  JoinTable,
 } from 'typeorm';
 import { LeadSource } from './lead-source.entity';
 import { LeadStatus } from './lead-status.entity';
 import { SalesAgent } from './sales-agent.entity';
+import { CustomerTag } from './customer-tag.entity';
 
 @Entity('crm_lead')
 @Index('idx_crm_lead_phone', ['primaryPhone'])
@@ -107,4 +110,12 @@ export class Lead {
 
   @Column({ name: 'is_deleted', type: 'boolean', default: false })
   isDeleted: boolean;
+
+  @ManyToMany(() => CustomerTag, (tag) => tag.leads, { cascade: true })
+  @JoinTable({
+    name: 'crm_lead_tags',
+    joinColumn: { name: 'lead_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'tag_id', referencedColumnName: 'id' },
+  })
+  tags: CustomerTag[];
 }

@@ -10,6 +10,7 @@ import { Lead } from '../entities/lead.entity';
 import { LeadStatus } from '../entities/lead-status.entity';
 import { LeadActivity } from '../entities/lead-activity.entity';
 import { SalesAgent } from '../entities/sales-agent.entity';
+import { NotificationService } from './notification.service';
 
 @Injectable()
 export class OpportunityService {
@@ -32,6 +33,7 @@ export class OpportunityService {
     private readonly leadActivityRepo: Repository<LeadActivity>,
     @InjectRepository(SalesAgent)
     private readonly agentRepo: Repository<SalesAgent>,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async convertLeadToOpportunity(
@@ -310,7 +312,10 @@ export class OpportunityService {
   }
 
   async addActivity(id: number, dto: any): Promise<OpportunityActivity> {
-    const opp = await this.opportunityRepo.findOne({ where: { id, isDeleted: false } });
+    const opp = await this.opportunityRepo.findOne({
+      where: { id, isDeleted: false },
+      relations: { lead: true, assignedSalesAgent: true },
+    });
     if (!opp) {
       throw new NotFoundException(`Opportunity with ID ${id} not found`);
     }
@@ -324,7 +329,29 @@ export class OpportunityService {
     act.outcome = dto.outcome || '';
     act.performedBy = dto.performedBy || 1;
 
-    return this.activityRepo.save(act);
+    const savedAct = await this.activityRepo.save(act);
+
+    // Also update lastContactedAt on the lead and create followup reminder
+    if (opp.lead) {
+      const lead = await this.leadRepo.findOne({ where: { id: opp.lead.id } });
+      if (lead) {
+        lead.lastContactedAt = new Date();
+        if (dto.nextActionDate) {
+          lead.nextFollowupAt = dto.nextActionDate;
+          
+          await this.notificationService.createReminder(
+            lead,
+            opp.assignedSalesAgent || lead.assignedSalesAgent,
+            new Date(dto.nextActionDate),
+            `Opportunity Follow-up: ${dto.subject || 'Interaction logged'}`,
+            `Scheduled follow-up reminder for opportunity "${opp.title}" (Lead: ${lead.fullName}). Notes: ${dto.description || ''}`
+          );
+        }
+        await this.leadRepo.save(lead);
+      }
+    }
+
+    return savedAct;
   }
 
   async addNote(id: number, noteContent: string): Promise<OpportunityNote> {

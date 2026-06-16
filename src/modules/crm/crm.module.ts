@@ -21,15 +21,29 @@ import { CommunicationChannel } from './entities/communication-channel.entity';
 import { Communication } from './entities/communication.entity';
 import { CommunicationAttachment } from './entities/communication-attachment.entity';
 import { CommunicationAudit } from './entities/communication-audit.entity';
+
+// New Advanced Features Entities
+import { CustomerTag } from './entities/customer-tag.entity';
+import { CustomerSegment } from './entities/customer-segment.entity';
+import { CustomerSegmentRule } from './entities/customer-segment-rule.entity';
+import { CustomerDocument } from './entities/customer-document.entity';
+import { CustomerDocumentVersion } from './entities/customer-document-version.entity';
+import { CustomerDocumentAccessLog } from './entities/customer-document-access-log.entity';
+
 import { CrmSeederService } from './crm-seeder.service';
 import { LeadService } from './services/lead-service';
 import { NotificationService } from './services/notification.service';
 import { EmailService } from './services/email.service';
 import { OpportunityService } from './services/opportunity.service';
+import { SegmentationService } from './services/segmentation.service';
+import { DocumentService } from './services/document.service';
+
 import { LeadController } from './controllers/lead.controller';
 import { AgentController } from './controllers/agent.controller';
 import { LeadSourceController } from './controllers/lead-source.controller';
 import { OpportunityController } from './controllers/opportunity.controller';
+import { SegmentationController } from './controllers/segmentation.controller';
+import { DocumentController } from './controllers/document.controller';
 
 @Module({
   imports: [
@@ -55,10 +69,41 @@ import { OpportunityController } from './controllers/opportunity.controller';
       Communication,
       CommunicationAttachment,
       CommunicationAudit,
+      
+      // New entities
+      CustomerTag,
+      CustomerSegment,
+      CustomerSegmentRule,
+      CustomerDocument,
+      CustomerDocumentVersion,
+      CustomerDocumentAccessLog,
     ]),
   ],
-  controllers: [LeadController, AgentController, LeadSourceController, OpportunityController],
-  providers: [CrmSeederService, LeadService, NotificationService, EmailService, OpportunityService],
-  exports: [TypeOrmModule, LeadService, NotificationService, EmailService, OpportunityService],
+  controllers: [
+    LeadController,
+    AgentController,
+    LeadSourceController,
+    OpportunityController,
+    SegmentationController,
+    DocumentController,
+  ],
+  providers: [
+    CrmSeederService,
+    LeadService,
+    NotificationService,
+    EmailService,
+    OpportunityService,
+    SegmentationService,
+    DocumentService,
+  ],
+  exports: [
+    TypeOrmModule,
+    LeadService,
+    NotificationService,
+    EmailService,
+    OpportunityService,
+    SegmentationService,
+    DocumentService,
+  ],
 })
 export class CrmModule {}

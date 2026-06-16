@@ -120,6 +120,39 @@ export class AgentController {
       throw new NotFoundException(err.message);
     }
   }
+
+  @Put('reminders/:id/snooze')
+  @ApiOperation({ summary: 'Snooze a followup reminder by a given number of minutes' })
+  @ApiParam({ name: 'id', description: 'Reminder ID' })
+  @ApiResponse({ status: 200, description: 'Reminder snoozed successfully' })
+  @ApiResponse({ status: 404, description: 'Reminder not found' })
+  async snoozeReminder(@Param('id') id: string, @Body('minutes') minutes: number) {
+    try {
+      return await this.notificationService.snoozeReminder(+id, minutes || 30);
+    } catch (err) {
+      throw new NotFoundException(err.message);
+    }
+  }
+
+  @Put('reminders/:id/reschedule')
+  @ApiOperation({ summary: 'Reschedule a followup reminder to a new datetime' })
+  @ApiParam({ name: 'id', description: 'Reminder ID' })
+  @ApiResponse({ status: 200, description: 'Reminder rescheduled successfully' })
+  @ApiResponse({ status: 404, description: 'Reminder not found' })
+  async rescheduleReminder(@Param('id') id: string, @Body('datetime') datetime: string) {
+    try {
+      return await this.notificationService.rescheduleReminder(+id, new Date(datetime));
+    } catch (err) {
+      throw new NotFoundException(err.message);
+    }
+  }
+
+  @Post('reminders/cron/check-escalations')
+  @ApiOperation({ summary: 'Trigger check of overdue reminders to escalate to managers' })
+  @ApiResponse({ status: 200, description: 'Overdue reminders check and escalation triggered' })
+  async checkEscalations() {
+    return this.notificationService.checkEscalations();
+  }
 }
 
 

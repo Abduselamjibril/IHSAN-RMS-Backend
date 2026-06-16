@@ -10,6 +10,7 @@ import { LeadNote } from '../entities/lead-note.entity';
 import { LeadContact } from '../entities/lead-contact.entity';
 import { Communication } from '../entities/communication.entity';
 import { CommunicationAttachment } from '../entities/communication-attachment.entity';
+import { Opportunity } from '../entities/opportunity.entity';
 import { NotificationService } from './notification.service';
 import { CreateLeadDto } from '../dto/create-lead.dto';
 import { UpdateLeadDto } from '../dto/update-lead.dto';
@@ -36,6 +37,8 @@ export class LeadService {
     private readonly communicationRepo: Repository<Communication>,
     @InjectRepository(CommunicationAttachment)
     private readonly attachmentRepo: Repository<CommunicationAttachment>,
+    @InjectRepository(Opportunity)
+    private readonly opportunityRepo: Repository<Opportunity>,
     private readonly notificationService: NotificationService,
   ) {}
 
@@ -230,6 +233,11 @@ export class LeadService {
       throw new NotFoundException(`Lead with ID ${id} not found`);
     }
 
+    const opportunity = await this.opportunityRepo.findOne({
+      where: { lead: { id: lead.id }, isDeleted: false },
+      relations: { opportunityStage: true },
+    });
+
     // Fetch activities, notes, and contacts
     const activities = await this.leadActivityRepo.find({
       where: { lead: { id } },
@@ -248,6 +256,7 @@ export class LeadService {
 
     return {
       ...lead,
+      opportunity,
       activities,
       notes,
       contacts,
@@ -585,9 +594,30 @@ export class LeadService {
       .addGroupBy('agent.fullName')
       .getRawMany();
 
+    // Opportunities stats
+    const totalOpportunities = await this.opportunityRepo.count({
+      where: { isDeleted: false },
+    });
+
+    const wonOpportunities = await this.opportunityRepo.count({
+      where: { isDeleted: false, isWon: true },
+    });
+
+    const pipelineResult = await this.opportunityRepo.createQueryBuilder('opp')
+      .select('SUM(opp.estimatedValue)', 'sum')
+      .where('opp.isDeleted = :isDeleted', { isDeleted: false })
+      .andWhere('opp.isWon = :isWon', { isWon: false })
+      .andWhere('opp.isLost = :isLost', { isLost: false })
+      .getRawOne();
+    
+    const pipelineValue = parseFloat(pipelineResult?.sum || '0');
+
     return {
       totalLeads,
       duplicateLeads,
+      totalOpportunities,
+      wonOpportunities,
+      pipelineValue,
       byStatus: statusCounts.map(s => ({
         status: s.statusName || 'Unassigned',
         color: s.colorCode || '#9ca3af',
