@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FollowupReminder } from '../entities/followup-reminder.entity';
 import { FollowupNotification } from '../entities/followup-notification.entity';
+import { FollowupHistory } from '../entities/followup-history.entity';
 import { Lead } from '../entities/lead.entity';
 import { SalesAgent } from '../entities/sales-agent.entity';
 import { EmailService } from './email.service';
@@ -14,6 +15,8 @@ export class NotificationService {
     private readonly reminderRepo: Repository<FollowupReminder>,
     @InjectRepository(FollowupNotification)
     private readonly notificationRepo: Repository<FollowupNotification>,
+    @InjectRepository(FollowupHistory)
+    private readonly historyRepo: Repository<FollowupHistory>,
     private readonly emailService: EmailService,
   ) {}
 
@@ -90,6 +93,131 @@ IHSAN REMS System Mailer`;
       throw new Error(`Reminder with ID ${id} not found`);
     }
     reminder.isCompleted = true;
+    reminder.completedAt = new Date();
+    reminder.status = 'Completed';
     return this.reminderRepo.save(reminder);
+  }
+
+  async snoozeReminder(id: number, minutes: number): Promise<FollowupReminder> {
+    const reminder = await this.reminderRepo.findOne({
+      where: { id },
+      relations: { assignedTo: true, lead: true },
+    });
+    if (!reminder) {
+      throw new Error(`Reminder with ID ${id} not found`);
+    }
+
+    const oldStatus = reminder.status;
+    const oldDatetime = new Date(reminder.reminderDatetime);
+    const newDatetime = new Date(oldDatetime.getTime() + minutes * 60 * 1000);
+    reminder.reminderDatetime = newDatetime;
+    reminder.status = 'Snoozed';
+    const saved = await this.reminderRepo.save(reminder);
+
+    // Create history
+    const hist = new FollowupHistory();
+    hist.reminder = saved;
+    hist.actionTaken = `Snoozed for ${minutes} minutes`;
+    hist.oldStatus = oldStatus;
+    hist.newStatus = 'Snoozed';
+    hist.remarks = `Snoozed from ${oldDatetime.toLocaleString()} to ${newDatetime.toLocaleString()}`;
+    hist.actionBy = 1;
+    await this.historyRepo.save(hist);
+
+    return saved;
+  }
+
+  async rescheduleReminder(id: number, newDate: Date): Promise<FollowupReminder> {
+    const reminder = await this.reminderRepo.findOne({
+      where: { id },
+      relations: { assignedTo: true, lead: true },
+    });
+    if (!reminder) {
+      throw new Error(`Reminder with ID ${id} not found`);
+    }
+
+    const oldStatus = reminder.status;
+    const oldDatetime = new Date(reminder.reminderDatetime);
+    reminder.reminderDatetime = newDate;
+    reminder.status = 'Rescheduled';
+    const saved = await this.reminderRepo.save(reminder);
+
+    // Create history
+    const hist = new FollowupHistory();
+    hist.reminder = saved;
+    hist.actionTaken = `Rescheduled`;
+    hist.oldStatus = oldStatus;
+    hist.newStatus = 'Rescheduled';
+    hist.remarks = `Rescheduled from ${oldDatetime.toLocaleString()} to ${newDate.toLocaleString()}`;
+    hist.actionBy = 1;
+    await this.historyRepo.save(hist);
+
+    return saved;
+  }
+
+  async checkEscalations(): Promise<{ escalatedCount: number }> {
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const overdueReminders = await this.reminderRepo.createQueryBuilder('reminder')
+      .leftJoinAndSelect('reminder.assignedTo', 'agent')
+      .leftJoinAndSelect('reminder.lead', 'lead')
+      .where('reminder.isCompleted = :isCompleted', { isCompleted: false })
+      .andWhere('reminder.status != :status', { status: 'Escalated' })
+      .andWhere('reminder.reminderDatetime <= :cutoff', { cutoff: twentyFourHoursAgo })
+      .getMany();
+
+    let escalatedCount = 0;
+    for (const reminder of overdueReminders) {
+      const oldStatus = reminder.status;
+      reminder.status = 'Escalated';
+      reminder.priority = 'High';
+      const saved = await this.reminderRepo.save(reminder);
+
+      // Create history
+      const hist = new FollowupHistory();
+      hist.reminder = saved;
+      hist.actionTaken = `Escalated`;
+      hist.oldStatus = oldStatus;
+      hist.newStatus = 'Escalated';
+      hist.remarks = `Automatically escalated because follow-up was overdue by more than 24 hours.`;
+      hist.actionBy = 1;
+      await this.historyRepo.save(hist);
+
+      // Create a FollowupNotification entry
+      const notif = new FollowupNotification();
+      notif.reminder = saved;
+      notif.notificationType = 'EmailEscalation';
+      notif.deliveryStatus = 'Sent';
+      notif.sentAt = new Date();
+      await this.notificationRepo.save(notif);
+
+      // Trigger email alert to manager
+      const managerEmail = 'manager@ihsanproperties.com';
+      const emailSubject = `[OVERDUE ESCALATION] Follow-up Overdue: ${reminder.subject}`;
+      const emailBody = `Dear Manager,
+
+This is an automated escalation alert from the IHSAN Real Estate Management System (REMS).
+
+The following follow-up reminder is OVERDUE by more than 24 hours and has been escalated:
+
+Agent:       ${reminder.assignedTo?.fullName || 'Unassigned'} (${reminder.assignedTo?.email || 'N/A'})
+Lead:        ${reminder.lead?.fullName || 'N/A'} (Code: ${reminder.lead?.leadCode || 'N/A'})
+Subject:     ${reminder.subject}
+Scheduled:   ${new Date(reminder.reminderDatetime).toLocaleString()}
+Message:     ${reminder.reminderMessage || '-'}
+
+Please take necessary actions.
+
+Best regards,
+IHSAN REMS System Mailer`;
+
+      await this.emailService.sendEmail(managerEmail, emailSubject, emailBody).catch(err => {
+        console.error('[EMAIL ERROR] Failed to send escalation email to manager:', err);
+      });
+
+      escalatedCount++;
+    }
+
+    return { escalatedCount };
   }
 }
