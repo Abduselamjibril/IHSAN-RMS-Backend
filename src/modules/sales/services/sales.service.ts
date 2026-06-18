@@ -31,6 +31,7 @@ import { SalesAuditLog } from '../entities/sales-audit-log.entity';
 // DTOs
 import {
   CreateCustomerDto,
+  UpdateCustomerDto,
   CreateReservationDto,
   ExtendReservationDto,
   CreateQuotationDto,
@@ -49,12 +50,47 @@ export class SalesService implements OnModuleInit {
 
   onModuleInit() {
     this.logger.log('SalesModule Service initialized. Scheduling daily reservation expiry sweeps...');
+    
+    // Retroactively update status of agreements and quotations
+    this.syncExistingStatuses()
+      .then(() => this.logger.log('Existing database statuses synced successfully.'))
+      .catch((err) => this.logger.error('Failed to sync existing database statuses', err));
+
     // Run Sweep every 12 hours
     setInterval(() => {
       this.processExpiredReservations()
         .then(() => this.logger.log('Periodic reservation expiry sweep completed successfully.'))
         .catch((err) => this.logger.error('Failed to run periodic reservation expiry sweep', err));
     }, 12 * 60 * 60 * 1000);
+  }
+
+  private async syncExistingStatuses() {
+    try {
+      // 1. Sync agreements to ACTIVE if contract is executed
+      const activeContracts = await this.contractRepo.find({ relations: { agreement: true } });
+      for (const contract of activeContracts) {
+        if (contract.agreement && contract.agreement.status !== 'ACTIVE') {
+          contract.agreement.status = 'ACTIVE';
+          await this.agreementRepo.save(contract.agreement);
+          this.logger.log(`Retroactively marked agreement ${contract.agreement.agreementNo} as ACTIVE due to executed contract ${contract.contractNo}`);
+        }
+      }
+
+      // 2. Sync quotations to ACCEPTED if booking is approved
+      const approvedBookings = await this.bookingRepo.find({ 
+        where: { status: 'APPROVED' }, 
+        relations: { quotation: true } 
+      });
+      for (const booking of approvedBookings) {
+        if (booking.quotation && booking.quotation.status !== 'ACCEPTED') {
+          booking.quotation.status = 'ACCEPTED';
+          await this.quotationRepo.save(booking.quotation);
+          this.logger.log(`Retroactively marked quotation ${booking.quotation.quotationNo} as ACCEPTED due to approved booking ${booking.bookingNo}`);
+        }
+      }
+    } catch (err) {
+      this.logger.error('Failed to sync existing database statuses', err);
+    }
   }
 
   constructor(
@@ -88,6 +124,14 @@ export class SalesService implements OnModuleInit {
   // --- Customer CRUD & Conversion Workflow ---
 
   async createCustomer(dto: CreateCustomerDto): Promise<Customer> {
+    // Check if customer with this phone number already exists and is active
+    const existing = await this.customerRepo.findOne({
+      where: { primaryPhone: dto.primaryPhone, isDeleted: false }
+    });
+    if (existing) {
+      throw new BadRequestException('A customer with this phone number already exists.');
+    }
+
     let lead: Lead | null = null;
     if (dto.leadId) {
       lead = await this.leadRepo.findOne({ where: { id: dto.leadId } });
@@ -114,6 +158,49 @@ export class SalesService implements OnModuleInit {
     const customer = await this.customerRepo.findOne({ where: { id, isDeleted: false } });
     if (!customer) throw new NotFoundException('Customer not found');
     return customer;
+  }
+
+  async updateCustomer(id: number, dto: UpdateCustomerDto): Promise<Customer> {
+    const customer = await this.findOneCustomer(id);
+
+    if (dto.primaryPhone && dto.primaryPhone !== customer.primaryPhone) {
+      const existing = await this.customerRepo.findOne({
+        where: { primaryPhone: dto.primaryPhone, isDeleted: false }
+      });
+      if (existing && existing.id !== customer.id) {
+        throw new BadRequestException('A customer with this phone number already exists.');
+      }
+      customer.primaryPhone = dto.primaryPhone;
+    }
+
+    if (dto.fullName !== undefined) customer.fullName = dto.fullName;
+    if (dto.primaryEmail !== undefined) customer.primaryEmail = dto.primaryEmail;
+    if (dto.nationality !== undefined) customer.nationality = dto.nationality;
+
+    return this.customerRepo.save(customer);
+  }
+
+  async deleteCustomer(id: number): Promise<{ success: boolean }> {
+    const customer = await this.findOneCustomer(id);
+
+    // Block deletion if the customer has any active transaction records linked to units
+    const [hasReservation, hasBooking, hasContract, hasQuotation, hasAgreement] = await Promise.all([
+      this.reservationRepo.findOne({ where: { customer: { id } } }),
+      this.bookingRepo.findOne({ where: { customer: { id } } }),
+      this.contractRepo.findOne({ where: { customer: { id } } }),
+      this.quotationRepo.findOne({ where: { customer: { id } } }),
+      this.agreementRepo.findOne({ where: { customer: { id } } }),
+    ]);
+
+    if (hasReservation || hasBooking || hasContract || hasQuotation || hasAgreement) {
+      throw new BadRequestException(
+        'Cannot delete customer because they are connected to active/past unit reservations, quotations, bookings, agreements, or contracts.'
+      );
+    }
+
+    customer.isDeleted = true;
+    await this.customerRepo.save(customer);
+    return { success: true };
   }
 
   // --- Reservation Management ---
@@ -324,10 +411,14 @@ export class SalesService implements OnModuleInit {
       vatAmount: vat,
       totalAmount: finalPrice,
       appliedRule,
+      appliedRuleDescription: appliedRule,
     };
   }
 
   async createQuotation(dto: CreateQuotationDto): Promise<SalesQuotation> {
+    if (dto.basePrice >= 1e16 || (dto.discountAmount || 0) >= 1e16 || (dto.vatAmount || 0) >= 1e16) {
+      throw new BadRequestException('Quotation amount values exceed maximum permitted precision (16 digits).');
+    }
     const customer = await this.customerRepo.findOne({ where: { id: dto.customerId } });
     if (!customer) throw new NotFoundException('Customer not found');
 
@@ -379,6 +470,9 @@ export class SalesService implements OnModuleInit {
   // --- Booking Management ---
 
   async createBooking(dto: CreateBookingDto): Promise<SalesBooking> {
+    if (dto.bookingAmount >= 1e16) {
+      throw new BadRequestException('Booking amount exceeds maximum permitted precision (16 digits).');
+    }
     const customer = await this.customerRepo.findOne({ where: { id: dto.customerId } });
     if (!customer) throw new NotFoundException('Customer not found');
 
@@ -417,7 +511,10 @@ export class SalesService implements OnModuleInit {
   }
 
   async approveBooking(id: number, approverId: number): Promise<SalesBooking> {
-    const booking = await this.bookingRepo.findOne({ where: { id }, relations: { unit: true } });
+    const booking = await this.bookingRepo.findOne({ 
+      where: { id }, 
+      relations: { unit: true, quotation: true } 
+    });
     if (!booking) throw new NotFoundException('Booking not found');
 
     const oldValue = { ...booking };
@@ -426,6 +523,12 @@ export class SalesService implements OnModuleInit {
     booking.approvedAt = new Date();
 
     const saved = await this.bookingRepo.save(booking);
+
+    // Transition linked quotation status to ACCEPTED
+    if (booking.quotation) {
+      booking.quotation.status = 'ACCEPTED';
+      await this.quotationRepo.save(booking.quotation);
+    }
 
     // Transition unit status to Sold
     const soldStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Sold' } });
@@ -515,6 +618,9 @@ export class SalesService implements OnModuleInit {
   }
 
   async createContract(dto: CreateContractDto): Promise<SalesContract> {
+    if (dto.contractAmount >= 1e16) {
+      throw new BadRequestException('Contract amount exceeds maximum permitted precision (16 digits).');
+    }
     const agreement = await this.agreementRepo.findOne({ where: { id: dto.agreementId } });
     if (!agreement) throw new NotFoundException('Agreement not found');
 
@@ -524,9 +630,9 @@ export class SalesService implements OnModuleInit {
     const refNo = 'CON-' + Date.now().toString().slice(-8);
 
     const contract = this.contractRepo.create({
-      contractNo: refNo,
       agreement,
       customer,
+      contractNo: refNo,
       contractStartDate: dto.contractStartDate,
       contractEndDate: dto.contractEndDate,
       contractAmount: dto.contractAmount,
@@ -534,6 +640,43 @@ export class SalesService implements OnModuleInit {
     });
 
     const savedContract = await this.contractRepo.save(contract);
+
+    // Transition underlying sales agreement status to ACTIVE
+    agreement.status = 'ACTIVE';
+    await this.agreementRepo.save(agreement);
+
+    // Transition booking status and update unit status to Sold
+    if (agreement.booking) {
+      const booking = await this.bookingRepo.findOne({
+        where: { id: agreement.booking.id },
+        relations: { unit: { unitStatus: true } }
+      });
+      if (booking) {
+        booking.status = 'CONTRACT_CREATED';
+        await this.bookingRepo.save(booking);
+
+        if (booking.unit) {
+          const unit = booking.unit;
+          const oldStatus = unit.unitStatus;
+          const soldStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Sold' } });
+          if (soldStatus && (!oldStatus || oldStatus.statusName !== 'Sold')) {
+            unit.unitStatus = soldStatus;
+            unit.reservationExpiry = null;
+            unit.soldDate = new Date();
+            await this.unitRepo.save(unit);
+
+            // Log unit status history
+            const history = this.unitStatusHistoryRepo.create({
+              unit,
+              oldStatus,
+              newStatus: soldStatus,
+              reason: `Unit sold. Contract ${refNo} executed.`,
+            });
+            await this.unitStatusHistoryRepo.save(history);
+          }
+        }
+      }
+    }
 
     // Automatically trigger commission calculations when contract becomes active
     await this.calculateCommissions(savedContract.id);
@@ -553,6 +696,13 @@ export class SalesService implements OnModuleInit {
     return this.contractDocRepo.save(doc);
   }
 
+  async removeContractDocument(docId: number): Promise<{ success: boolean }> {
+    const doc = await this.contractDocRepo.findOne({ where: { id: docId } });
+    if (!doc) throw new NotFoundException('Document not found');
+    await this.contractDocRepo.remove(doc);
+    return { success: true };
+  }
+
   async findAllContracts(): Promise<SalesContract[]> {
     return this.contractRepo.find({ order: { createdAt: 'DESC' } });
   }
@@ -560,6 +710,9 @@ export class SalesService implements OnModuleInit {
   // --- Installment Plan & Scheduler ---
 
   async generateInstallmentPlan(dto: CreateInstallmentPlanDto): Promise<InstallmentPlan> {
+    if (dto.totalContractAmount >= 1e16 || dto.downPayment >= 1e16) {
+      throw new BadRequestException('Installment plan amount values exceed maximum permitted precision (16 digits).');
+    }
     const contract = await this.contractRepo.findOne({ where: { id: dto.contractId } });
     if (!contract) throw new NotFoundException('Contract not found');
 
@@ -610,8 +763,11 @@ export class SalesService implements OnModuleInit {
     return this.planRepo.find({ order: { createdAt: 'DESC' } });
   }
 
-  async updateInstallmentPayment(scheduleId: number, paidAmount: number): Promise<InstallmentSchedule> {
-    const schedule = await this.scheduleRepo.findOne({ where: { id: scheduleId } });
+  async payInstallment(scheduleId: number, paidAmount: number): Promise<InstallmentSchedule> {
+    if (paidAmount >= 1e16) {
+      throw new BadRequestException('Payment amount exceeds maximum permitted precision (16 digits).');
+    }
+    const schedule = await this.scheduleRepo.findOne({ where: { id: scheduleId }, relations: { plan: { contract: true } } });
     if (!schedule) throw new NotFoundException('Installment not found');
 
     schedule.paidAmount = Number(schedule.paidAmount) + Number(paidAmount);
@@ -656,16 +812,24 @@ export class SalesService implements OnModuleInit {
     });
     await this.approvalRepo.save(history);
 
-    // Apply the approved discount percentage to the quotation
+    // Apply the approved discount percentage to the quotation as an addition
     if (request.quotation) {
       const q = await this.quotationRepo.findOne({ where: { id: request.quotation.id } });
       if (q) {
+        let additionalDiscount = 0;
         if (request.discountPercentage && Number(request.discountPercentage) > 0) {
-          q.discountAmount = Number(q.basePrice) * (Number(request.discountPercentage) / 100);
+          additionalDiscount = Number(q.basePrice) * (Number(request.discountPercentage) / 100);
         } else if (request.requestedDiscount && Number(request.requestedDiscount) > 0) {
-          q.discountAmount = Number(request.requestedDiscount);
+          additionalDiscount = Number(request.requestedDiscount);
         }
-        q.totalAmount = Number(q.basePrice) - q.discountAmount + Number(q.vatAmount);
+        
+        q.discountAmount = Number(q.discountAmount || 0) + additionalDiscount;
+
+        // Recalculate VAT and total amount based on the new net price
+        const netPrice = Number(q.basePrice) - q.discountAmount;
+        q.vatAmount = netPrice * 0.15; // 15% VAT
+        q.totalAmount = netPrice + q.vatAmount;
+
         await this.quotationRepo.save(q);
       }
     }
@@ -761,7 +925,10 @@ export class SalesService implements OnModuleInit {
   }
 
   async getCommissions(): Promise<SalesCommission[]> {
-    return this.commissionRepo.find({ order: { createdAt: 'DESC' } });
+    return this.commissionRepo.find({
+      relations: { contract: true },
+      order: { createdAt: 'DESC' }
+    });
   }
 
   // --- Dashboard Analytics ---

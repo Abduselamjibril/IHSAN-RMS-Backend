@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Unit } from '../entities/unit.entity';
 import { UnitType } from '../entities/unit-type.entity';
 import { UnitStatus } from '../entities/unit-status.entity';
@@ -172,6 +172,24 @@ export class UnitsService {
       .take(limit);
 
     const [items, total] = await qb.getManyAndCount();
+
+    if (items.length > 0) {
+      const unitIds = items.map(u => u.id);
+      const activePrices = await this.unitPriceRepo.find({
+        where: { unit: { id: In(unitIds) }, isActive: true },
+        relations: { unit: true }
+      });
+      const priceMap = new Map(activePrices.map(ap => [ap.unit.id, ap]));
+      for (const item of items) {
+        const activePrice = priceMap.get(item.id);
+        if (activePrice) {
+          (item as any).discountPercentage = Number(activePrice.discountPercentage || 0);
+        } else {
+          (item as any).discountPercentage = 0;
+        }
+      }
+    }
+
     return { items, total };
   }
 

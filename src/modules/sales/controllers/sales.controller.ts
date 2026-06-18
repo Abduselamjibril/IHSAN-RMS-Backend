@@ -3,14 +3,21 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as fs from 'fs';
 import { ApiTags } from '@nestjs/swagger';
 import { SalesService } from '../services/sales.service';
 import {
   CreateCustomerDto,
+  UpdateCustomerDto,
   CreateReservationDto,
   ExtendReservationDto,
   CreateQuotationDto,
@@ -41,6 +48,16 @@ export class SalesController {
   @Get('customers/:id')
   findOneCustomer(@Param('id') id: string) {
     return this.service.findOneCustomer(+id);
+  }
+
+  @Put('customers/:id')
+  updateCustomer(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
+    return this.service.updateCustomer(+id, dto);
+  }
+
+  @Delete('customers/:id')
+  deleteCustomer(@Param('id') id: string) {
+    return this.service.deleteCustomer(+id);
   }
 
   // --- Reservations ---
@@ -140,6 +157,35 @@ export class SalesController {
     return this.service.uploadContractDocument(+id, fileName, filePath);
   }
 
+  @Post('contracts/:id/document/upload')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({
+      destination: (req, file, cb) => {
+        const dest = './uploads/contracts';
+        if (!fs.existsSync(dest)) {
+          fs.mkdirSync(dest, { recursive: true });
+        }
+        cb(null, dest);
+      },
+      filename: (req, file, cb) => {
+        cb(null, file.originalname);
+      }
+    })
+  }))
+  async uploadContractFile(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+    @Body('fileName') fileName: string,
+  ) {
+    const filePath = `/uploads/contracts/${file.filename || file.originalname}`;
+    return this.service.uploadContractDocument(+id, fileName || file.originalname, filePath);
+  }
+
+  @Delete('contracts/documents/:id')
+  removeContractDocument(@Param('id') id: string) {
+    return this.service.removeContractDocument(+id);
+  }
+
   // --- Installments ---
   @Post('installments/plan')
   generateInstallmentPlan(@Body() dto: CreateInstallmentPlanDto) {
@@ -156,7 +202,7 @@ export class SalesController {
     @Param('id') id: string,
     @Body('paidAmount') paidAmount: number,
   ) {
-    return this.service.updateInstallmentPayment(+id, paidAmount);
+    return this.service.payInstallment(+id, paidAmount);
   }
 
   // --- Discounts ---

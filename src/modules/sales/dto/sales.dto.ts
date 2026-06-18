@@ -17,6 +17,20 @@ export class CreateCustomerDto {
   leadId?: number;
 }
 
+export class UpdateCustomerDto {
+  @ApiPropertyOptional({ example: 'John Doe Update' })
+  fullName?: string;
+
+  @ApiPropertyOptional({ example: '+251911223344' })
+  primaryPhone?: string;
+
+  @ApiPropertyOptional({ example: 'john.update@example.com' })
+  primaryEmail?: string;
+
+  @ApiPropertyOptional({ example: 'Ethiopian' })
+  nationality?: string;
+}
+
 export class CreateReservationDto {
   @ApiProperty({ example: 1 })
   customerId: number;
