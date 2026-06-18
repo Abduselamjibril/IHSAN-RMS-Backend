@@ -5,6 +5,7 @@ import { LeadStatus } from './entities/lead-status.entity';
 import { SalesAgent } from './entities/sales-agent.entity';
 import { Lead } from './entities/lead.entity';
 import { LeadContact } from './entities/lead-contact.entity';
+import { Customer } from './entities/customer.entity';
 import { LeadNote } from './entities/lead-note.entity';
 import { LeadActivity } from './entities/lead-activity.entity';
 import { OpportunityStage } from './entities/opportunity-stage.entity';
@@ -39,6 +40,7 @@ import { OpportunityController } from './controllers/opportunity.controller';
       SalesAgent,
       Lead,
       LeadContact,
+      Customer,
       LeadNote,
       LeadActivity,
       OpportunityStage,

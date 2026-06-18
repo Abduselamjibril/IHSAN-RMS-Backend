@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CrmModule } from './modules/crm/crm.module';
 import { PropertiesModule } from './modules/properties/properties.module';
+import { SalesModule } from './modules/sales/sales.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { PropertiesModule } from './modules/properties/properties.module';
     }),
     CrmModule,
     PropertiesModule,
+    SalesModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
