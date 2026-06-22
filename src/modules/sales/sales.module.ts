@@ -23,7 +23,6 @@ import { SalesBooking } from './entities/sales-booking.entity';
 import { SalesAgreement } from './entities/sales-agreement.entity';
 import { SalesContract } from './entities/sales-contract.entity';
 import { SalesContractDocument } from './entities/sales-contract-document.entity';
-import { InstallmentPlan } from './entities/installment-plan.entity';
 import { InstallmentSchedule } from './entities/installment-schedule.entity';
 import { DiscountRequest } from './entities/discount-request.entity';
 import { DiscountApprovalHistory } from './entities/discount-approval-history.entity';
@@ -56,7 +55,6 @@ import { SalesController } from './controllers/sales.controller';
       SalesAgreement,
       SalesContract,
       SalesContractDocument,
-      InstallmentPlan,
       InstallmentSchedule,
       DiscountRequest,
       DiscountApprovalHistory,

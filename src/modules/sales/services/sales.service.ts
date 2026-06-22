@@ -20,7 +20,6 @@ import { SalesBooking } from '../entities/sales-booking.entity';
 import { SalesAgreement } from '../entities/sales-agreement.entity';
 import { SalesContract } from '../entities/sales-contract.entity';
 import { SalesContractDocument } from '../entities/sales-contract-document.entity';
-import { InstallmentPlan } from '../entities/installment-plan.entity';
 import { InstallmentSchedule } from '../entities/installment-schedule.entity';
 import { DiscountRequest } from '../entities/discount-request.entity';
 import { DiscountApprovalHistory } from '../entities/discount-approval-history.entity';
@@ -112,7 +111,6 @@ export class SalesService implements OnModuleInit {
     @InjectRepository(SalesAgreement) private readonly agreementRepo: Repository<SalesAgreement>,
     @InjectRepository(SalesContract) private readonly contractRepo: Repository<SalesContract>,
     @InjectRepository(SalesContractDocument) private readonly contractDocRepo: Repository<SalesContractDocument>,
-    @InjectRepository(InstallmentPlan) private readonly planRepo: Repository<InstallmentPlan>,
     @InjectRepository(InstallmentSchedule) private readonly scheduleRepo: Repository<InstallmentSchedule>,
     @InjectRepository(DiscountRequest) private readonly discountRepo: Repository<DiscountRequest>,
     @InjectRepository(DiscountApprovalHistory) private readonly approvalRepo: Repository<DiscountApprovalHistory>,
@@ -709,23 +707,21 @@ export class SalesService implements OnModuleInit {
 
   // --- Installment Plan & Scheduler ---
 
-  async generateInstallmentPlan(dto: CreateInstallmentPlanDto): Promise<InstallmentPlan> {
+  async generateInstallmentPlan(dto: CreateInstallmentPlanDto): Promise<any> {
     if (dto.totalContractAmount >= 1e16 || dto.downPayment >= 1e16) {
       throw new BadRequestException('Installment plan amount values exceed maximum permitted precision (16 digits).');
     }
-    const contract = await this.contractRepo.findOne({ where: { id: dto.contractId } });
+    const contract = await this.contractRepo.findOne({
+      where: { id: dto.contractId },
+      relations: { property: true }
+    });
     if (!contract) throw new NotFoundException('Contract not found');
 
-    const plan = this.planRepo.create({
-      contract,
-      totalContractAmount: dto.totalContractAmount,
-      downPayment: dto.downPayment,
-      installmentFrequency: dto.installmentFrequency,
-      numberOfInstallments: dto.numberOfInstallments,
-      schedules: [],
-    });
-
-    const savedPlan = await this.planRepo.save(plan);
+    // Save installment parameters directly to the contract
+    contract.downPayment = dto.downPayment;
+    contract.totalInstallments = dto.numberOfInstallments;
+    contract.installmentFrequency = dto.installmentFrequency;
+    await this.contractRepo.save(contract);
 
     // Calculate installment amount
     const remainingAmount = Number(dto.totalContractAmount) - Number(dto.downPayment);
@@ -745,7 +741,7 @@ export class SalesService implements OnModuleInit {
       }
 
       const schedule = this.scheduleRepo.create({
-        plan: savedPlan,
+        contract,
         installmentNo: i,
         dueDate,
         installmentAmount: installmentAmt,
@@ -755,19 +751,54 @@ export class SalesService implements OnModuleInit {
       schedules.push(schedule);
     }
 
-    savedPlan.schedules = await this.scheduleRepo.save(schedules);
-    return savedPlan;
+    const savedSchedules = await this.scheduleRepo.save(schedules);
+
+    return {
+      id: contract.id,
+      contract,
+      installmentFrequency: contract.installmentFrequency,
+      numberOfInstallments: contract.totalInstallments,
+      totalContractAmount: contract.contractAmount,
+      downPayment: contract.downPayment,
+      schedules: savedSchedules
+    };
   }
 
-  async getInstallmentPlans(): Promise<InstallmentPlan[]> {
-    return this.planRepo.find({ order: { createdAt: 'DESC' } });
+  async getInstallmentPlans(): Promise<any[]> {
+    const contracts = await this.contractRepo.find({
+      relations: { customer: true, property: true },
+      order: { createdAt: 'DESC' }
+    });
+
+    const results: any[] = [];
+    for (const contract of contracts) {
+      const schedules = await this.scheduleRepo.find({
+        where: { contract: { id: contract.id } },
+        order: { installmentNo: 'ASC' }
+      });
+      if (schedules.length > 0) {
+        results.push({
+          id: contract.id,
+          contract,
+          installmentFrequency: contract.installmentFrequency,
+          numberOfInstallments: contract.totalInstallments,
+          totalContractAmount: contract.contractAmount,
+          downPayment: contract.downPayment,
+          schedules
+        });
+      }
+    }
+    return results;
   }
 
   async payInstallment(scheduleId: number, paidAmount: number): Promise<InstallmentSchedule> {
     if (paidAmount >= 1e16) {
       throw new BadRequestException('Payment amount exceeds maximum permitted precision (16 digits).');
     }
-    const schedule = await this.scheduleRepo.findOne({ where: { id: scheduleId }, relations: { plan: { contract: true } } });
+    const schedule = await this.scheduleRepo.findOne({
+      where: { id: scheduleId },
+      relations: { contract: true }
+    });
     if (!schedule) throw new NotFoundException('Installment not found');
 
     schedule.paidAmount = Number(schedule.paidAmount) + Number(paidAmount);
