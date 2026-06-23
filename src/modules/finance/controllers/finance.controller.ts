@@ -161,4 +161,25 @@ export class FinanceController {
   triggerReminderEngine() {
     return this.service.triggerReminderEngine();
   }
+
+  // --- Global Organization Settings & User Signatures ---
+  @Get('settings')
+  getSettings() {
+    return this.service.getSettings();
+  }
+
+  @Post('settings')
+  updateSettings(@Body() dto: any) {
+    return this.service.updateSettings(dto);
+  }
+
+  @Get('users/signature')
+  getUserSignature() {
+    return this.service.getUserSignature();
+  }
+
+  @Post('users/signature')
+  updateUserSignature(@Body() dto: { signature_png_base64: string }) {
+    return this.service.updateUserSignature(dto);
+  }
 }

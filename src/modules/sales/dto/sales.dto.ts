@@ -186,6 +186,30 @@ export class CreateInstallmentPlanDto {
 
   @ApiProperty({ example: 12 })
   numberOfInstallments: number;
+
+  @ApiPropertyOptional()
+  recordPayment?: boolean;
+
+  @ApiPropertyOptional()
+  paymentMethodId?: number;
+
+  @ApiPropertyOptional()
+  paymentReference?: string;
+
+  @ApiPropertyOptional()
+  paymentDate?: string;
+
+  @ApiPropertyOptional()
+  bankName?: string;
+
+  @ApiPropertyOptional()
+  transactionReference?: string;
+
+  @ApiPropertyOptional()
+  chequeNumber?: string;
+
+  @ApiPropertyOptional()
+  remarks?: string;
 }
 
 export class CreateDiscountRequestDto {

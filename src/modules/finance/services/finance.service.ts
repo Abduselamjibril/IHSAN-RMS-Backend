@@ -18,6 +18,8 @@ import { RevenueSummary } from '../entities/revenue-summary.entity';
 import { NotificationTemplate } from '../entities/notification-template.entity';
 import { ReminderConfiguration } from '../entities/reminder-configuration.entity';
 import { PaymentReminder } from '../entities/payment-reminder.entity';
+import { OrganizationSettings } from '../entities/organization-settings.entity';
+import { UserSignature } from '../entities/user-signature.entity';
 
 // CRM & Sales Entities
 import { Customer } from '../../crm/entities/customer.entity';
@@ -57,6 +59,8 @@ export class FinanceService implements OnModuleInit {
     @InjectRepository(Customer) private readonly customerRepo: Repository<Customer>,
     @InjectRepository(SalesContract) private readonly contractRepo: Repository<SalesContract>,
     @InjectRepository(InstallmentSchedule) private readonly scheduleRepo: Repository<InstallmentSchedule>,
+    @InjectRepository(OrganizationSettings) private readonly settingsRepo: Repository<OrganizationSettings>,
+    @InjectRepository(UserSignature) private readonly signatureRepo: Repository<UserSignature>,
   ) {}
 
   async onModuleInit() {
@@ -298,34 +302,18 @@ export class FinanceService implements OnModuleInit {
     const receiptNo = 'REC-' + Date.now().toString().slice(-8);
     const defaultTemplate = await this.receiptTemplateRepo.findOne({ where: { isDefault: true } });
 
-    const receiptPdfName = `receipt-PAY-${payment.id}.pdf`;
+    const receiptPdfName = `receipt-PAY-${payment.id}.txt`;
     const receiptPdfPath = join(__dirname, '..', '..', '..', '..', 'uploads', 'receipts', receiptPdfName);
 
-    // Write mock receipt file text inside PDF named file for E2E testing
-    const receiptContent = `
-========================================
-RECEIPT INVOICE: ${receiptNo}
-========================================
-Date: ${new Date().toLocaleDateString()}
-Payment Reference: ${payment.paymentReference}
-Customer: ${payment.customer.fullName}
-Contract No: ${payment.contract.contractNo}
-Amount Paid: ETB ${payment.paymentAmount.toLocaleString()}
-Payment Method: ${payment.paymentMethod.paymentMethodName}
-----------------------------------------
-Outstanding Balance Remaining: ETB ${(Number(payment.contract.contractAmount) - Number(payment.paymentAmount)).toLocaleString()}
-========================================
-${defaultTemplate?.headerText || 'IHSAN Properties'}
-${defaultTemplate?.footerText || ''}
-${defaultTemplate?.signatureText || ''}
-`;
+    const receiptDate = new Date();
+    const receiptContent = this.generateReceiptFileContent(receiptNo, payment, defaultTemplate, receiptDate);
     fs.writeFileSync(receiptPdfPath, receiptContent);
 
     const receipt = this.receiptRepo.create({
       receiptNumber: receiptNo,
       payment: savedPayment,
       receiptTemplate: defaultTemplate,
-      receiptDate: new Date(),
+      receiptDate,
       pdfUrl: `/uploads/receipts/${receiptPdfName}`,
       generatedBy: approverId,
     });
@@ -393,7 +381,7 @@ ${defaultTemplate?.signatureText || ''}
     // 2. Delete linked receipt
     const receipt = await this.receiptRepo.findOne({ where: { payment: { id: payment.id } } });
     if (receipt) {
-      const receiptPdfPath = join(__dirname, '..', '..', '..', '..', 'uploads', 'receipts', `receipt-PAY-${payment.id}.pdf`);
+      const receiptPdfPath = join(__dirname, '..', '..', '..', '..', 'uploads', 'receipts', `receipt-PAY-${payment.id}.txt`);
       if (fs.existsSync(receiptPdfPath)) {
         try { fs.unlinkSync(receiptPdfPath); } catch {}
       }
@@ -592,6 +580,7 @@ ${defaultTemplate?.signatureText || ''}
     if (dto.signatureText !== undefined) template.signatureText = dto.signatureText;
     if (dto.qrEnabled !== undefined) template.qrEnabled = dto.qrEnabled;
     if (dto.isDefault !== undefined) template.isDefault = dto.isDefault;
+    if (dto.templateContent !== undefined) template.templateContent = dto.templateContent;
 
     return this.receiptTemplateRepo.save(template);
   }
@@ -600,10 +589,49 @@ ${defaultTemplate?.signatureText || ''}
     return this.receiptRepo.find({ relations: { payment: { contract: { customer: true } } } });
   }
 
+  private generateReceiptFileContent(receiptNo: string, payment: any, template: any, receiptDate: Date): string {
+    return `
+========================================
+RECEIPT INVOICE: ${receiptNo}
+========================================
+Date: ${receiptDate.toLocaleDateString()}
+Payment Reference: ${payment.paymentReference || ''}
+Customer: ${payment.customer?.fullName || ''}
+Contract No: ${payment.contract?.contractNo || ''}
+Amount Paid: ETB ${Number(payment.paymentAmount || 0).toLocaleString()}
+Payment Method: ${payment.paymentMethod?.paymentMethodName || ''}
+----------------------------------------
+Outstanding Balance Remaining: ETB ${(Number(payment.contract?.contractAmount || 0) - Number(payment.paymentAmount || 0)).toLocaleString()}
+========================================
+${template?.headerText || 'IHSAN Properties'}
+${template?.footerText || ''}
+${template?.signatureText || ''}
+`;
+  }
+
   async reprintReceipt(id: number): Promise<Receipt> {
-    const r = await this.receiptRepo.findOne({ where: { id }, relations: { payment: true } });
+    const r = await this.receiptRepo.findOne({
+      where: { id },
+      relations: {
+        payment: {
+          customer: true,
+          contract: true,
+          paymentMethod: true,
+        },
+      },
+    });
     if (!r) throw new NotFoundException('Receipt reference not found.');
+
     r.receiptDate = new Date();
+
+    // Regenerate the receipt mock text file on disk using current default template
+    const defaultTemplate = await this.receiptTemplateRepo.findOne({ where: { isDefault: true } });
+    const receiptPdfName = `receipt-PAY-${r.payment.id}.txt`;
+    const receiptPdfPath = join(__dirname, '..', '..', '..', '..', 'uploads', 'receipts', receiptPdfName);
+
+    const receiptContent = this.generateReceiptFileContent(r.receiptNumber, r.payment, defaultTemplate, r.receiptDate);
+    fs.writeFileSync(receiptPdfPath, receiptContent);
+
     return this.receiptRepo.save(r);
   }
 
@@ -836,4 +864,63 @@ ${defaultTemplate?.signatureText || ''}
       reminderCount: count,
       remarks: `Reminder scan completed. Issued ${count} mock customer reminders.`,
     };
-  }}
+  }
+
+  // --- Organization Settings & Signature Pad ---
+  async getSettings(): Promise<OrganizationSettings> {
+    let settings = await this.settingsRepo.findOne({ where: {} });
+    if (!settings) {
+      settings = this.settingsRepo.create({
+        companyName: 'IHSAN Properties & Business Service PLC',
+        primaryColor: '#4F46E5',
+        secondaryColor: '#1E293B',
+        fontFamily: 'Helvetica',
+        companyPhone: '+251-11-1234567',
+        companyEmail: 'info@ihsanproperties.com',
+        companyAddress: 'Bole, Addis Ababa, Ethiopia',
+        logoPath: '',
+        companySealPath: '',
+        headerImagePath: '',
+        footerImagePath: '',
+        authorizedSignatoryName: 'Abebe Manager',
+        authorizedSignatoryTitle: 'General Manager'
+      });
+      await this.settingsRepo.save(settings);
+    }
+    return settings;
+  }
+
+  async updateSettings(dto: any): Promise<OrganizationSettings> {
+    const settings = await this.getSettings();
+    Object.assign(settings, dto);
+    return this.settingsRepo.save(settings);
+  }
+
+  async getUserSignature(): Promise<UserSignature | null> {
+    return this.signatureRepo.findOne({ where: { userId: 1 } });
+  }
+
+  async updateUserSignature(dto: { signature_png_base64: string }): Promise<UserSignature> {
+    const signatureDir = join(__dirname, '..', '..', '..', '..', 'uploads', 'signatures');
+    if (!fs.existsSync(signatureDir)) {
+      fs.mkdirSync(signatureDir, { recursive: true });
+    }
+
+    const base64Data = dto.signature_png_base64.replace(/^data:image\/png;base64,/, '');
+    const filename = `signature-user-1.png`;
+    const filepath = join(signatureDir, filename);
+    fs.writeFileSync(filepath, base64Data, 'base64');
+
+    const dbPath = `/uploads/signatures/${filename}`;
+    let signature = await this.signatureRepo.findOne({ where: { userId: 1 } });
+    if (!signature) {
+      signature = this.signatureRepo.create({
+        userId: 1,
+        signaturePngPath: dbPath
+      });
+    } else {
+      signature.signaturePngPath = dbPath;
+    }
+    return this.signatureRepo.save(signature);
+  }
+}

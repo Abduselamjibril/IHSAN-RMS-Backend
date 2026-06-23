@@ -26,6 +26,9 @@ export class ReceiptTemplate {
   @Column({ name: 'is_default', type: 'boolean', default: false })
   isDefault: boolean;
 
-  @CreateDateColumn({ name: 'created_date', type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ name: 'template_content', type: 'text', nullable: true })
+  templateContent: string;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

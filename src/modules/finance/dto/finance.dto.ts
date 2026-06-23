@@ -90,6 +90,10 @@ export class CreateReceiptTemplateDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  @IsOptional()
+  @IsString()
+  templateContent?: string;
 }
 
 export class CreatePenaltyConfigDto {

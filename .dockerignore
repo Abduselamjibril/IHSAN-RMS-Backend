@@ -8,5 +8,4 @@ Dockerfile
 .vscode
 .prettierrc
 eslint.config.mjs
-tsconfig.build.json
 test

@@ -30,12 +30,13 @@ import { SalesCommissionRule } from './entities/sales-commission-rule.entity';
 import { SalesCommission } from './entities/sales-commission.entity';
 import { SalesAuditLog } from './entities/sales-audit-log.entity';
 
-// Service & Controller
+import { FinanceModule } from '../finance/finance.module';
 import { SalesService } from './services/sales.service';
 import { SalesController } from './controllers/sales.controller';
 
 @Module({
   imports: [
+    FinanceModule,
     TypeOrmModule.forFeature([
       Customer,
       Lead,

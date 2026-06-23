@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { FinanceService } from '../../finance/services/finance.service';
 import { Customer } from '../../crm/entities/customer.entity';
 import { Lead } from '../../crm/entities/lead.entity';
 import { SalesAgent } from '../../crm/entities/sales-agent.entity';
@@ -117,6 +118,7 @@ export class SalesService implements OnModuleInit {
     @InjectRepository(SalesCommissionRule) private readonly commRuleRepo: Repository<SalesCommissionRule>,
     @InjectRepository(SalesCommission) private readonly commissionRepo: Repository<SalesCommission>,
     @InjectRepository(SalesAuditLog) private readonly auditLogRepo: Repository<SalesAuditLog>,
+    private readonly financeService: FinanceService,
   ) {}
 
   // --- Customer CRUD & Conversion Workflow ---
@@ -713,15 +715,38 @@ export class SalesService implements OnModuleInit {
     }
     const contract = await this.contractRepo.findOne({
       where: { id: dto.contractId },
-      relations: { property: true }
+      relations: { property: true, customer: true }
     });
     if (!contract) throw new NotFoundException('Contract not found');
+
+    const existingScheduleCount = await this.scheduleRepo.count({
+      where: { contract: { id: dto.contractId } }
+    });
+    if (existingScheduleCount > 0) {
+      throw new BadRequestException('An installment schedule plan has already been generated for this contract.');
+    }
 
     // Save installment parameters directly to the contract
     contract.downPayment = dto.downPayment;
     contract.totalInstallments = dto.numberOfInstallments;
     contract.installmentFrequency = dto.installmentFrequency;
     await this.contractRepo.save(contract);
+
+    // Automatically record down payment if requested
+    if (dto.recordPayment && dto.downPayment > 0 && dto.paymentMethodId) {
+      await this.financeService.createPayment({
+        contractId: dto.contractId,
+        customerId: contract.customer?.id,
+        paymentMethodId: dto.paymentMethodId,
+        paymentDate: dto.paymentDate || new Date().toISOString().split('T')[0],
+        paymentAmount: dto.downPayment,
+        paymentReference: dto.paymentReference,
+        bankName: dto.bankName,
+        transactionReference: dto.transactionReference,
+        chequeNumber: dto.chequeNumber,
+        remarks: dto.remarks || 'Down payment automatically registered upon plan generation.',
+      });
+    }
 
     // Calculate installment amount
     const remainingAmount = Number(dto.totalContractAmount) - Number(dto.downPayment);

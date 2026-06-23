@@ -15,12 +15,22 @@ async function bootstrap() {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
+  // No payload size limit for base64 image uploads (logos, seals, headers)
+  app.use(express.json({ limit: Infinity }));
+  app.use(express.urlencoded({ limit: Infinity, extended: true }));
+
   // Serve static uploaded files
-  app.use('/uploads', express.static(uploadsDir));
+  app.use('/uploads', express.static(uploadsDir, {
+    setHeaders: (res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+  }));
 
   // Allow Angular dev server at :4200 to call this API
   app.enableCors({
-    origin: ['http://localhost:4200', 'http://127.0.0.1:4200', 'http://localhost:54013'],
+    origin: ['http://localhost:4200', 'http://127.0.0.1:4200', 'http://localhost:65275'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

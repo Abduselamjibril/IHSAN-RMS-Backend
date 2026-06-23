@@ -15,6 +15,8 @@ import { RevenueSummary } from './entities/revenue-summary.entity';
 import { NotificationTemplate } from './entities/notification-template.entity';
 import { ReminderConfiguration } from './entities/reminder-configuration.entity';
 import { PaymentReminder } from './entities/payment-reminder.entity';
+import { OrganizationSettings } from './entities/organization-settings.entity';
+import { UserSignature } from './entities/user-signature.entity';
 
 // CRM & Sales Entities needed
 import { Customer } from '../crm/entities/customer.entity';
@@ -41,6 +43,8 @@ import { FinanceController } from './controllers/finance.controller';
       NotificationTemplate,
       ReminderConfiguration,
       PaymentReminder,
+      OrganizationSettings,
+      UserSignature,
       Customer,
       SalesContract,
       InstallmentSchedule,
