@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleIni
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FinanceService } from '../../finance/services/finance.service';
+import { BrokerService } from '../../broker/services/broker.service';
 import { Customer } from '../../crm/entities/customer.entity';
 import { Lead } from '../../crm/entities/lead.entity';
 import { SalesAgent } from '../../crm/entities/sales-agent.entity';
@@ -119,6 +120,7 @@ export class SalesService implements OnModuleInit {
     @InjectRepository(SalesCommission) private readonly commissionRepo: Repository<SalesCommission>,
     @InjectRepository(SalesAuditLog) private readonly auditLogRepo: Repository<SalesAuditLog>,
     private readonly financeService: FinanceService,
+    private readonly brokerService: BrokerService,
   ) {}
 
   // --- Customer CRUD & Conversion Workflow ---
@@ -254,6 +256,12 @@ export class SalesService implements OnModuleInit {
     }
 
     await this.logAudit('SalesReservation', savedReservation.id, 'CREATE', null, savedReservation);
+
+    try {
+      await this.brokerService.handleSalesEvent('RESERVATION_CREATED', savedReservation);
+    } catch (e) {
+      this.logger.error('Failed to trigger broker reservation created event', e);
+    }
 
     return savedReservation;
   }
@@ -551,6 +559,12 @@ export class SalesService implements OnModuleInit {
 
     await this.logAudit('SalesBooking', saved.id, 'APPROVE', oldValue, saved);
 
+    try {
+      await this.brokerService.handleSalesEvent('BOOKING_APPROVED', saved);
+    } catch (e) {
+      this.logger.error('Failed to trigger broker booking approved event', e);
+    }
+
     return saved;
   }
 
@@ -680,6 +694,18 @@ export class SalesService implements OnModuleInit {
 
     // Automatically trigger commission calculations when contract becomes active
     await this.calculateCommissions(savedContract.id);
+
+    try {
+      const contractWithBooking = await this.contractRepo.findOne({
+        where: { id: savedContract.id },
+        relations: { agreement: { booking: { property: true, reservation: true } }, customer: { lead: true } }
+      });
+      if (contractWithBooking) {
+        await this.brokerService.handleSalesEvent('CONTRACT_CREATED', contractWithBooking);
+      }
+    } catch (e) {
+      this.logger.error('Failed to trigger broker contract created event', e);
+    }
 
     return savedContract;
   }

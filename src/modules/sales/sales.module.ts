@@ -31,12 +31,14 @@ import { SalesCommission } from './entities/sales-commission.entity';
 import { SalesAuditLog } from './entities/sales-audit-log.entity';
 
 import { FinanceModule } from '../finance/finance.module';
+import { BrokerModule } from '../broker/broker.module';
 import { SalesService } from './services/sales.service';
 import { SalesController } from './controllers/sales.controller';
 
 @Module({
   imports: [
     FinanceModule,
+    BrokerModule,
     TypeOrmModule.forFeature([
       Customer,
       Lead,
