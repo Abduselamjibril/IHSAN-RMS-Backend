@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { FinanceService } from '../../finance/services/finance.service';
 import { BrokerService } from '../../broker/services/broker.service';
 import { Customer } from '../../crm/entities/customer.entity';
@@ -87,6 +87,19 @@ export class SalesService implements OnModuleInit {
           booking.quotation.status = 'ACCEPTED';
           await this.quotationRepo.save(booking.quotation);
           this.logger.log(`Retroactively marked quotation ${booking.quotation.quotationNo} as ACCEPTED due to approved booking ${booking.bookingNo}`);
+        }
+      }
+
+      // 3. Sync contracts to ensure property_id is populated from agreement -> booking -> property
+      const contractsWithNullProperty = await this.contractRepo.find({
+        where: { property: IsNull() },
+        relations: { agreement: { booking: { property: true } } }
+      });
+      for (const contract of contractsWithNullProperty) {
+        if (contract.agreement && contract.agreement.booking && contract.agreement.booking.property) {
+          contract.property = contract.agreement.booking.property;
+          await this.contractRepo.save(contract);
+          this.logger.log(`Retroactively set property ${contract.property.propertyName} on contract ${contract.contractNo}`);
         }
       }
     } catch (err) {
@@ -646,6 +659,7 @@ export class SalesService implements OnModuleInit {
     const contract = this.contractRepo.create({
       agreement,
       customer,
+      property: agreement.booking?.property,
       contractNo: refNo,
       contractStartDate: dto.contractStartDate,
       contractEndDate: dto.contractEndDate,

@@ -11,7 +11,7 @@
 export interface SeededPermission {
   name: string;
   description: string;
-  module: 'CRM' | 'Marketing' | 'Property' | 'Sales' | 'Finance' | 'Broker';
+  module: 'CRM' | 'Marketing' | 'Property' | 'Sales' | 'Finance' | 'Broker' | 'Reports' | 'Dashboard';
   controller: string;
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   path: string;
@@ -1876,5 +1876,165 @@ export const SEEDED_PERMISSIONS: SeededPermission[] = [
     controller: 'BrokerController',
     method: 'GET',
     path: '/api/brokers/:id/targets',
+  },
+
+  // =========================================================================
+  // REPORTING & DASHBOARD MODULE ENDPOINTS
+  // =========================================================================
+
+  // --- 21. Reports Controller (Prefix: /api/reports) ---
+  {
+    name: 'reports.read',
+    description: 'Get all report templates',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports',
+  },
+  {
+    name: 'reports.sales.read',
+    description: 'Get Sales Performance Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/sales',
+  },
+  {
+    name: 'reports.inventory.availability.read',
+    description: 'Get Inventory Availability Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/inventory/availability',
+  },
+  {
+    name: 'reports.inventory.aging.read',
+    description: 'Get Inventory Aging Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/inventory/aging',
+  },
+  {
+    name: 'reports.properties.availability.read',
+    description: 'Get Property Availability Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/properties/availability',
+  },
+  {
+    name: 'reports.revenue.read',
+    description: 'Get Revenue Analysis Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/revenue',
+  },
+  {
+    name: 'reports.collections.read',
+    description: 'Get Collection Monitoring Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/collections',
+  },
+  {
+    name: 'reports.receivables.read',
+    description: 'Get Outstanding Receivables Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/outstanding-balances',
+  },
+  {
+    name: 'reports.leads.funnel.read',
+    description: 'Get Lead Conversion Funnel Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/lead-conversions',
+  },
+  {
+    name: 'reports.broker.commissions.read',
+    description: 'Get Broker Earnings Report',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/broker-commissions',
+  },
+  {
+    name: 'reports.read_one',
+    description: 'Get details of a report template by ID',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'GET',
+    path: '/api/reports/:reportId',
+  },
+  {
+    name: 'reports.export',
+    description: 'Export report query to CSV file format',
+    module: 'Reports',
+    controller: 'ReportsController',
+    method: 'POST',
+    path: '/api/reports/export',
+  },
+
+  // --- 22. Dashboard Controller (Prefix: /api/dashboard) ---
+  {
+    name: 'dashboard.kpis.read',
+    description: 'Get Executive Dashboard KPI snapshot metrics',
+    module: 'Dashboard',
+    controller: 'DashboardController',
+    method: 'GET',
+    path: '/api/dashboard/kpis',
+  },
+  {
+    name: 'dashboard.realtime.read',
+    description: 'Get near real-time operational dashboard stats',
+    module: 'Dashboard',
+    controller: 'DashboardController',
+    method: 'GET',
+    path: '/api/dashboard/realtime',
+  },
+  {
+    name: 'dashboard.trends.sales.read',
+    description: 'Get Sales Performance chart trends',
+    module: 'Dashboard',
+    controller: 'DashboardController',
+    method: 'GET',
+    path: '/api/dashboard/trends/sales',
+  },
+  {
+    name: 'dashboard.trends.revenue.read',
+    description: 'Get Revenue Growth chart trends',
+    module: 'Dashboard',
+    controller: 'DashboardController',
+    method: 'GET',
+    path: '/api/dashboard/trends/revenue',
+  },
+  {
+    name: 'dashboard.trends.collections.read',
+    description: 'Get Collection Performance chart trends',
+    module: 'Dashboard',
+    controller: 'DashboardController',
+    method: 'GET',
+    path: '/api/dashboard/trends/collections',
+  },
+  {
+    name: 'dashboard.trends.leads.read',
+    description: 'Get Lead Funnel Acquisition chart trends',
+    module: 'Dashboard',
+    controller: 'DashboardController',
+    method: 'GET',
+    path: '/api/dashboard/trends/leads',
+  },
+  {
+    name: 'dashboard.trends.brokers.read',
+    description: 'Get Broker Performance sales chart trends',
+    module: 'Dashboard',
+    controller: 'DashboardController',
+    method: 'GET',
+    path: '/api/dashboard/trends/brokers',
   },
 ];
