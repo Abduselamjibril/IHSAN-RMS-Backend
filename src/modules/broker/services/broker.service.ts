@@ -385,6 +385,13 @@ export class BrokerService {
     return this.projPlanRepo.save(mapping);
   }
 
+  async getAllProjectCommissionPlans(): Promise<ProjectCommissionPlan[]> {
+    return this.projPlanRepo.find({
+      relations: { property: true, commissionPlan: true },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async getProjectCommissionPlans(propertyId: number): Promise<ProjectCommissionPlan[]> {
     return this.projPlanRepo.find({
       where: { property: { id: propertyId } },
@@ -704,10 +711,10 @@ export class BrokerService {
   async getDashboardStats(): Promise<any> {
     const brokersCount = await this.brokerRepo.count({ where: { statusId: 'ACTIVE' } });
     
-    const sales = await this.saleRepo.find({ where: { saleStatusId: 'ACTIVE' } });
+    const sales = await this.saleRepo.find({ where: { saleStatusId: 'ACTIVE' }, relations: { broker: true } });
     const totalSalesValue = sales.reduce((sum, s) => sum + Number(s.saleAmount), 0);
 
-    const commissions = await this.commissionRepo.find();
+    const commissions = await this.commissionRepo.find({ relations: { broker: true } });
     const totalEarnedCommissions = commissions.reduce((sum, c) => sum + Number(c.commissionAmount), 0);
     const paidCommissions = commissions.filter(c => c.statusId === 'PAID');
     const totalPaidCommissions = paidCommissions.reduce((sum, c) => sum + Number(c.commissionAmount), 0);
