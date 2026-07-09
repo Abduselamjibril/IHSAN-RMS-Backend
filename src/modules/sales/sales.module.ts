@@ -34,10 +34,11 @@ import { FinanceModule } from '../finance/finance.module';
 import { BrokerModule } from '../broker/broker.module';
 import { SalesService } from './services/sales.service';
 import { SalesController } from './controllers/sales.controller';
+import { forwardRef } from '@nestjs/common';
 
 @Module({
   imports: [
-    FinanceModule,
+    forwardRef(() => FinanceModule),
     BrokerModule,
     TypeOrmModule.forFeature([
       Customer,

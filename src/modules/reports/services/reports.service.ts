@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThan, MoreThanOrEqual } from 'typeorm';
 
@@ -25,7 +25,7 @@ import { BrokerCommission } from '../../broker/entities/broker-commission.entity
 import { InstallmentSchedule } from '../../sales/entities/installment-schedule.entity';
 
 @Injectable()
-export class ReportsService {
+export class ReportsService implements OnModuleInit {
   constructor(
     @InjectRepository(ReportTemplate)
     private readonly templateRepo: Repository<ReportTemplate>,
@@ -78,6 +78,108 @@ export class ReportsService {
     @InjectRepository(InstallmentSchedule)
     private readonly installmentRepo: Repository<InstallmentSchedule>,
   ) {}
+
+  async onModuleInit() {
+    const count = await this.templateRepo.count();
+    if (count === 0) {
+      const templates = [
+        {
+          code: 'SALES_PERFORMANCE',
+          name: 'Sales Performance Report',
+          category: 'Sales',
+          description: 'Monitor sales activities, contracted units, reservations, and average deal sizes.',
+          columns: ['contractNo', 'siteName', 'propertyCode', 'propertyName', 'propertyType', 'contractAmount', 'salesAgent', 'brokerName', 'contractDate', 'status'],
+          defaultFilters: {}
+        },
+        {
+          code: 'INVENTORY_AVAILABILITY',
+          name: 'Inventory Availability Report',
+          category: 'Inventory',
+          description: 'Current real-time status of all properties/units: available, reserved, sold, and blocked.',
+          columns: ['propertyCode', 'propertyName', 'siteName', 'propertyType', 'unitSize', 'listingPrice', 'currentStatus', 'reservedBy', 'reservationDate', 'soldTo', 'saleDate', 'salesAgent', 'brokerName', 'lastStatusUpdateDate', 'daysAvailable'],
+          defaultFilters: {}
+        },
+        {
+          code: 'INVENTORY_AGING',
+          name: 'Inventory Aging Report',
+          category: 'Inventory',
+          description: 'Detailed analysis of how long properties have remained unsold in active inventory.',
+          columns: ['propertyName', 'buildingName', 'propertyCode', 'propertyType', 'unitSize', 'listingPrice', 'availableSince', 'daysInInventory', 'agingBucket', 'currentStatus', 'assignedSalesperson', 'assignedBroker', 'lastCustomerInquiryDate', 'numberOfInquiries', 'numberOfSiteVisits', 'reservationAttempts', 'priceRevisionCount', 'expectedRevenue'],
+          defaultFilters: {}
+        },
+        {
+          code: 'PROPERTY_AVAILABILITY',
+          name: 'Property Availability Report',
+          category: 'Inventory',
+          description: 'Detailed availability information for properties currently available for sale.',
+          columns: ['propertyCode', 'propertyName', 'siteName', 'buildingName', 'floorNumber', 'propertyType', 'unitCategory', 'unitSize', 'bedroomCount', 'bathroomCount', 'balconyCount', 'parkingSpaces', 'currentPrice', 'discountAmount', 'netSellingPrice', 'bookingFee', 'paymentPlan', 'availableStatus', 'availableDate', 'estimatedCompletionDate', 'constructionProgress', 'salesAgent', 'brokerName', 'numberOfActiveLeads', 'numberOfSiteVisits', 'lastInquiryDate', 'featuredProperty'],
+          defaultFilters: {}
+        },
+        {
+          code: 'REVENUE_ANALYSIS',
+          name: 'Revenue Analysis Report',
+          category: 'Revenue',
+          description: 'Analyze realized revenue vs cash-flow targets by properties and payment types.',
+          columns: ['contractNo', 'propertyName', 'propertyType', 'contractAmount', 'collected', 'outstanding'],
+          defaultFilters: {}
+        },
+        {
+          code: 'COLLECTION_MONITORING',
+          name: 'Collection Monitoring Report',
+          category: 'Collections',
+          description: 'Monitor customer payment collections, pending invoices, and schedules.',
+          columns: ['paymentReference', 'propertyName', 'paymentDate', 'paymentAmount', 'paymentMethod'],
+          defaultFilters: {}
+        },
+        {
+          code: 'RECEIVABLE_MONITORING',
+          name: 'Outstanding Receivables Report',
+          category: 'Receivables',
+          description: 'Track aging customer balances and overdue payments.',
+          columns: ['customerName', 'contractNo', 'propertyName', 'contractAmount', 'totalPaid', 'outstandingBalance'],
+          defaultFilters: {}
+        },
+        {
+          code: 'LEAD_FUNNEL',
+          name: 'Lead Funnel Analysis',
+          category: 'CRM',
+          description: 'Track CRM performance and client conversion rates.',
+          columns: ['leadName', 'leadSource', 'propertyName', 'statusName', 'isConverted', 'createdAt'],
+          defaultFilters: {}
+        },
+        {
+          code: 'BROKER_COMMISSIONS',
+          name: 'Broker Earnings Report',
+          category: 'Commissions',
+          description: 'Monitor broker commissions, referral payouts, and approvals.',
+          columns: ['brokerName', 'propertyName', 'saleAmount', 'commissionAmount', 'calculatedDate', 'status'],
+          defaultFilters: {}
+        }
+      ];
+
+      for (const t of templates) {
+        const template = new ReportTemplate();
+        Object.assign(template, t);
+        await this.templateRepo.save(template);
+      }
+      console.log('🌱 Seeded default report templates successfully.');
+    }
+  }
+
+  async createSchedule(data: any): Promise<ReportSchedule> {
+    const template = await this.findTemplateById(Number(data.reportTemplateId));
+    const schedule = new ReportSchedule();
+    schedule.reportTemplate = template;
+    schedule.recipientEmail = data.recipientEmail;
+    schedule.frequency = data.frequency || 'DAILY';
+    schedule.filters = data.filters || {};
+    schedule.isActive = data.isActive !== undefined ? data.isActive : true;
+    return this.scheduleRepo.save(schedule);
+  }
+
+  async findAllSchedules(): Promise<ReportSchedule[]> {
+    return this.scheduleRepo.find();
+  }
 
   // --- Common Helper for Sorting & Pagination ---
   paginateAndSort(items: any[], query: any) {
