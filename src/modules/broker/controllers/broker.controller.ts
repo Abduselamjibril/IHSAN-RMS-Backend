@@ -52,6 +52,30 @@ export class BrokerController {
     return this.brokerService.getCommissionPlans();
   }
 
+  @Get('commission-plans/projects/all')
+  @ApiOperation({ summary: 'Get all project commission plan mappings' })
+  async getAllProjectCommissionPlans() {
+    return this.brokerService.getAllProjectCommissionPlans();
+  }
+
+  @Post('commission-plans')
+  @ApiOperation({ summary: 'Create a new commission plan' })
+  async createCommissionPlan(@Body() dto: CreateCommissionPlanDto) {
+    return this.brokerService.createCommissionPlan(dto);
+  }
+
+  @Post('commission-plans/projects')
+  @ApiOperation({ summary: 'Map a commission plan to a project' })
+  async assignProjectCommissionPlan(@Body() dto: AssignProjectCommissionPlanDto) {
+    return this.brokerService.assignProjectCommissionPlan(dto);
+  }
+
+  @Get('commission-plans/projects/:propertyId')
+  @ApiOperation({ summary: 'Get commission plan mapping for a specific project' })
+  async getProjectCommissionPlans(@Param('propertyId', ParseIntPipe) propertyId: number) {
+    return this.brokerService.getProjectCommissionPlans(propertyId);
+  }
+
   @Get('commission-plans/:id')
   @ApiOperation({ summary: 'Get commission plan by ID' })
   async getCommissionPlanById(@Param('id', ParseIntPipe) id: number) {
@@ -198,24 +222,7 @@ export class BrokerController {
     return { message: 'Lead assignment deactivated' };
   }
 
-  // --- Commission Plans Master Setup ---
-  @Post('commission-plans')
-  @ApiOperation({ summary: 'Create a new commission plan' })
-  async createCommissionPlan(@Body() dto: CreateCommissionPlanDto) {
-    return this.brokerService.createCommissionPlan(dto);
-  }
 
-  @Post('commission-plans/projects')
-  @ApiOperation({ summary: 'Map a commission plan to a project' })
-  async assignProjectCommissionPlan(@Body() dto: AssignProjectCommissionPlanDto) {
-    return this.brokerService.assignProjectCommissionPlan(dto);
-  }
-
-  @Get('commission-plans/projects/:propertyId')
-  @ApiOperation({ summary: 'Get commission plan mapping for a specific project' })
-  async getProjectCommissionPlans(@Param('propertyId', ParseIntPipe) propertyId: number) {
-    return this.brokerService.getProjectCommissionPlans(propertyId);
-  }
 
   // --- Sales Attributions ---
   @Post('sales')
