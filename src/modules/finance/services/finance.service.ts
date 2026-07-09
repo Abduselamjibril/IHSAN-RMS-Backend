@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { SalesService } from '../../sales/services/sales.service';
 import * as fs from 'fs';
 import { join } from 'path';
 
@@ -61,6 +62,8 @@ export class FinanceService implements OnModuleInit {
     @InjectRepository(InstallmentSchedule) private readonly scheduleRepo: Repository<InstallmentSchedule>,
     @InjectRepository(OrganizationSettings) private readonly settingsRepo: Repository<OrganizationSettings>,
     @InjectRepository(UserSignature) private readonly signatureRepo: Repository<UserSignature>,
+    @Inject(forwardRef(() => SalesService))
+    private readonly salesService: SalesService,
   ) {}
 
   async onModuleInit() {
@@ -321,6 +324,13 @@ export class FinanceService implements OnModuleInit {
 
     // 4. Update balance snapshot
     await this.updateCustomerBalance(payment.contract.id, payment.customer.id);
+
+    // 5. Trigger commission calculations check when payment is approved
+    if (payment.contract) {
+      await this.salesService.calculateCommissions(payment.contract.id).catch(err => {
+        this.logger.error(`Failed to calculate commissions for contract ${payment.contract.id}:`, err);
+      });
+    }
 
     return savedPayment;
   }

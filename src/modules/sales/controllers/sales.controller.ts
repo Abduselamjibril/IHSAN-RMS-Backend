@@ -4,6 +4,7 @@ import {
   Post,
   Put,
   Delete,
+  Patch,
   Body,
   Param,
   Query,
@@ -248,6 +249,21 @@ export class SalesController {
   @Get('commissions')
   getCommissions() {
     return this.service.getCommissions();
+  }
+
+  @Patch('commissions/:id/status')
+  updateCommissionStatus(
+    @Param('id') id: string,
+    @Body('status') status: string,
+  ) {
+    return this.service.updateCommissionStatus(+id, status);
+  }
+
+  @Patch('contracts/:id/terminate')
+  terminateContract(
+    @Param('id') id: string,
+  ) {
+    return this.service.terminateContract(+id);
   }
 
   // --- Dashboard ---

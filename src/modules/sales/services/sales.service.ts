@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { FinanceService } from '../../finance/services/finance.service';
@@ -132,6 +132,7 @@ export class SalesService implements OnModuleInit {
     @InjectRepository(SalesCommissionRule) private readonly commRuleRepo: Repository<SalesCommissionRule>,
     @InjectRepository(SalesCommission) private readonly commissionRepo: Repository<SalesCommission>,
     @InjectRepository(SalesAuditLog) private readonly auditLogRepo: Repository<SalesAuditLog>,
+    @Inject(forwardRef(() => FinanceService))
     private readonly financeService: FinanceService,
     private readonly brokerService: BrokerService,
   ) {}
@@ -976,6 +977,7 @@ export class SalesService implements OnModuleInit {
     const contract = await this.contractRepo.findOne({
       where: { id: contractId },
       relations: {
+        customer: true,
         agreement: {
           booking: {
             unit: true,
@@ -992,6 +994,40 @@ export class SalesService implements OnModuleInit {
     });
     if (!lead || !lead.assignedSalesAgent) {
       this.logger.warn(`No assigned Sales Agent found for customer ${contract.customer.fullName}. Commission skipped.`);
+      return;
+    }
+
+    // 1. Eligibility Check: Verify sales contract is ACTIVE
+    if (contract.status !== 'ACTIVE') {
+      this.logger.warn(`Contract ${contract.contractNo} status is ${contract.status}. Expected ACTIVE. Commission skipped.`);
+      return;
+    }
+
+    // 2. Eligibility Check: Verify the assigned salesperson is active
+    if (lead.assignedSalesAgent.isActive === false) {
+      this.logger.warn(`Assigned Sales Agent ${lead.assignedSalesAgent.fullName} is inactive. Commission skipped.`);
+      return;
+    }
+
+    // 3. Eligibility Check: Verify a commission has not already been generated for this contract
+    const existing = await this.commissionRepo.findOne({
+      where: { contract: { id: contractId } }
+    });
+    if (existing) {
+      this.logger.warn(`Commission already generated for contract ${contract.contractNo}. Commission skipped.`);
+      return;
+    }
+
+    // 4. Eligibility Check: Verify customer has completed required down payment
+    const approvedPayments = await this.financeService.getPayments({
+      contractId,
+      status: 'APPROVED'
+    });
+    const totalPaid = approvedPayments.reduce((sum, p) => sum + Number(p.paymentAmount || 0), 0);
+    const requiredDownPayment = Number(contract.downPayment || 0);
+
+    if (totalPaid < requiredDownPayment) {
+      this.logger.log(`Contract ${contract.contractNo} paid down payment sum is ETB ${totalPaid} (Required: ETB ${requiredDownPayment}). Commission skipped.`);
       return;
     }
 
@@ -1014,10 +1050,11 @@ export class SalesService implements OnModuleInit {
       commissionRule: activeRule,
       saleAmount: saleAmt,
       commissionAmount: commAmt,
-      status: 'PENDING',
+      status: 'CALCULATED',
     });
 
     await this.commissionRepo.save(commission);
+    this.logger.log(`Successfully generated CALCULATED commission for contract ${contract.contractNo} (Agent: ${lead.assignedSalesAgent.fullName})`);
   }
 
   async getCommissions(): Promise<SalesCommission[]> {
@@ -1025,6 +1062,67 @@ export class SalesService implements OnModuleInit {
       relations: { contract: true },
       order: { createdAt: 'DESC' }
     });
+  }
+
+  async updateCommissionStatus(id: number, status: string): Promise<SalesCommission> {
+    const commission = await this.commissionRepo.findOne({
+      where: { id },
+      relations: { contract: true }
+    });
+    if (!commission) throw new NotFoundException('Sales commission not found');
+
+    const validStatuses = ['CALCULATED', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REVERSED'];
+    if (!validStatuses.includes(status)) {
+      throw new BadRequestException(`Invalid status: ${status}. Must be one of ${validStatuses.join(', ')}`);
+    }
+
+    commission.status = status;
+    return this.commissionRepo.save(commission);
+  }
+
+  async terminateContract(contractId: number): Promise<SalesContract> {
+    const contract = await this.contractRepo.findOne({
+      where: { id: contractId },
+      relations: { agreement: { booking: { unit: { unitStatus: true } } } }
+    });
+    if (!contract) throw new NotFoundException('Sales contract not found');
+
+    // 1. Update contract status to TERMINATED
+    contract.status = 'TERMINATED';
+    const savedContract = await this.contractRepo.save(contract);
+
+    // 2. Release unit status back to AVAILABLE
+    if (contract.agreement?.booking?.unit) {
+      const unit = contract.agreement.booking.unit;
+      const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'AVAILABLE' } });
+      if (availableStatus) {
+        const oldStatus = unit.unitStatus;
+        unit.unitStatus = availableStatus;
+        unit.soldDate = null;
+        await this.unitRepo.save(unit);
+
+        // Log unit status history
+        const history = this.unitStatusHistoryRepo.create({
+          unit,
+          oldStatus,
+          newStatus: availableStatus,
+          reason: `Contract ${contract.contractNo} terminated. Unit released.`,
+        });
+        await this.unitStatusHistoryRepo.save(history);
+      }
+    }
+
+    // 3. Automatically reverse all approved/paid/calculated commissions linked to this contract
+    const commissions = await this.commissionRepo.find({
+      where: { contract: { id: contractId } }
+    });
+    for (const comm of commissions) {
+      comm.status = 'REVERSED';
+      await this.commissionRepo.save(comm);
+    }
+
+    this.logger.log(`Contract ${contract.contractNo} terminated. Associated commissions reversed.`);
+    return savedContract;
   }
 
   // --- Dashboard Analytics ---

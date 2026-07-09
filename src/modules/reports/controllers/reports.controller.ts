@@ -58,6 +58,16 @@ export class ReportsController {
     return this.service.getBrokerCommissionsReport(query);
   }
 
+  @Get('schedules')
+  async getSchedules() {
+    return this.service.findAllSchedules();
+  }
+
+  @Post('schedules')
+  async createSchedule(@Body() body: any) {
+    return this.service.createSchedule(body);
+  }
+
   @Get(':reportId')
   async getTemplate(@Param('reportId') id: string) {
     return this.service.findTemplateById(+id);

@@ -36,8 +36,8 @@ export class SalesCommission {
   @Column({ name: 'commission_amount', type: 'numeric', precision: 18, scale: 2, nullable: true })
   commissionAmount: number;
 
-  @Column({ type: 'varchar', length: 30, nullable: true })
-  status: string; // PENDING, APPROVED, PAID
+  @Column({ type: 'varchar', length: 30, default: 'CALCULATED' })
+  status: string; // CALCULATED, PENDING_APPROVAL, APPROVED, PAID, REVERSED
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;

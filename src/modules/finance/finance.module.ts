@@ -26,9 +26,12 @@ import { InstallmentSchedule } from '../sales/entities/installment-schedule.enti
 // Controller & Service
 import { FinanceService } from './services/finance.service';
 import { FinanceController } from './controllers/finance.controller';
+import { forwardRef } from '@nestjs/common';
+import { SalesModule } from '../sales/sales.module';
 
 @Module({
   imports: [
+    forwardRef(() => SalesModule),
     TypeOrmModule.forFeature([
       PaymentMethod,
       Payment,
