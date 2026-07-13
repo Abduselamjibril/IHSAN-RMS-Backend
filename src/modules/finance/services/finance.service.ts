@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logge
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { SalesService } from '../../sales/services/sales.service';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 import * as fs from 'fs';
 import { join } from 'path';
 
@@ -16,7 +17,7 @@ import { PenaltyConfiguration } from '../entities/penalty-configuration.entity';
 import { PenaltyTransaction } from '../entities/penalty-transaction.entity';
 import { CustomerBalance } from '../entities/customer-balance.entity';
 import { RevenueSummary } from '../entities/revenue-summary.entity';
-import { NotificationTemplate } from '../entities/notification-template.entity';
+import { NotificationTemplate } from '../../notifications/entities/notification-template.entity';
 import { ReminderConfiguration } from '../entities/reminder-configuration.entity';
 import { PaymentReminder } from '../entities/payment-reminder.entity';
 import { OrganizationSettings } from '../entities/organization-settings.entity';
@@ -64,6 +65,7 @@ export class FinanceService implements OnModuleInit {
     @InjectRepository(UserSignature) private readonly signatureRepo: Repository<UserSignature>,
     @Inject(forwardRef(() => SalesService))
     private readonly salesService: SalesService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async onModuleInit() {
@@ -325,6 +327,28 @@ export class FinanceService implements OnModuleInit {
     // 4. Update balance snapshot
     await this.updateCustomerBalance(payment.contract.id, payment.customer.id);
 
+    // Send Payment Confirmed Notification
+    try {
+      const customer = payment.customer;
+      const amountStr = Number(payment.paymentAmount).toLocaleString();
+      await this.notificationsService.sendNotification({
+        categoryCode: 'PAYMENT',
+        title: 'Payment Confirmed & Receipt Issued',
+        body: `Dear ${customer.fullName},\nWe have successfully received and confirmed your payment of ETB ${amountStr} (Receipt #${receiptNo}). Thank you for your payment.`,
+        referenceTypeId: 'PAYMENT',
+        referenceId: payment.id,
+        recipients: [
+          {
+            recipientName: customer.fullName,
+            emailAddress: customer.primaryEmail || undefined,
+            phoneNumber: customer.primaryPhone,
+          },
+        ],
+      });
+    } catch (e) {
+      this.logger.error('Failed to send payment receipt notification', e);
+    }
+
     // 5. Trigger commission calculations check when payment is approved
     if (payment.contract) {
       await this.salesService.calculateCommissions(payment.contract.id).catch(err => {
@@ -336,7 +360,7 @@ export class FinanceService implements OnModuleInit {
   }
 
   async rejectPayment(id: number, approverId: number, dto: ApprovePaymentDto): Promise<Payment> {
-    const payment = await this.paymentRepo.findOne({ where: { id } });
+    const payment = await this.paymentRepo.findOne({ where: { id }, relations: { customer: true } });
     if (!payment) throw new NotFoundException('Payment not found.');
     if (payment.status !== 'PENDING') {
       throw new BadRequestException(`Cannot reject payment. Current status: ${payment.status}`);
@@ -353,6 +377,28 @@ export class FinanceService implements OnModuleInit {
       approvalDate: new Date(),
     });
     await this.approvalRepo.save(approval);
+
+    // Send Payment Rejected Notification
+    try {
+      const customer = payment.customer;
+      const amountStr = Number(payment.paymentAmount).toLocaleString();
+      await this.notificationsService.sendNotification({
+        categoryCode: 'PAYMENT',
+        title: 'Payment Verification Failed',
+        body: `Dear ${customer.fullName},\nYour payment of ETB ${amountStr} could not be verified and has been rejected. Reason: ${dto.approvalComment || 'No reason provided'}. Please contact support.`,
+        referenceTypeId: 'PAYMENT',
+        referenceId: payment.id,
+        recipients: [
+          {
+            recipientName: customer.fullName,
+            emailAddress: customer.primaryEmail || undefined,
+            phoneNumber: customer.primaryPhone,
+          },
+        ],
+      });
+    } catch (e) {
+      this.logger.error('Failed to send payment rejection notification', e);
+    }
 
     return saved;
   }

@@ -32,6 +32,7 @@ import { SalesAuditLog } from './entities/sales-audit-log.entity';
 
 import { FinanceModule } from '../finance/finance.module';
 import { BrokerModule } from '../broker/broker.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SalesService } from './services/sales.service';
 import { SalesController } from './controllers/sales.controller';
 import { forwardRef } from '@nestjs/common';
@@ -40,6 +41,7 @@ import { forwardRef } from '@nestjs/common';
   imports: [
     forwardRef(() => FinanceModule),
     BrokerModule,
+    NotificationsModule,
     TypeOrmModule.forFeature([
       Customer,
       Lead,

@@ -13,6 +13,7 @@ import { BrokerModule } from './modules/broker/broker.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SecurityModule } from './modules/security/security.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuditLogInterceptor } from './modules/security/interceptors/audit-log.interceptor';
 
 @Module({
@@ -29,6 +30,7 @@ import { AuditLogInterceptor } from './modules/security/interceptors/audit-log.i
     ReportsModule,
     SecurityModule,
     WorkflowModule,
+    NotificationsModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { FinanceService } from '../../finance/services/finance.service';
 import { BrokerService } from '../../broker/services/broker.service';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 import { Customer } from '../../crm/entities/customer.entity';
 import { Lead } from '../../crm/entities/lead.entity';
 import { SalesAgent } from '../../crm/entities/sales-agent.entity';
@@ -132,9 +133,10 @@ export class SalesService implements OnModuleInit {
     @InjectRepository(SalesCommissionRule) private readonly commRuleRepo: Repository<SalesCommissionRule>,
     @InjectRepository(SalesCommission) private readonly commissionRepo: Repository<SalesCommission>,
     @InjectRepository(SalesAuditLog) private readonly auditLogRepo: Repository<SalesAuditLog>,
-    @Inject(forwardRef(() => FinanceService))
+     @Inject(forwardRef(() => FinanceService))
     private readonly financeService: FinanceService,
     private readonly brokerService: BrokerService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // --- Customer CRUD & Conversion Workflow ---
@@ -222,7 +224,7 @@ export class SalesService implements OnModuleInit {
   // --- Reservation Management ---
 
   async createReservation(dto: CreateReservationDto): Promise<SalesReservation> {
-    const customer = await this.customerRepo.findOne({ where: { id: dto.customerId } });
+    const customer = await this.customerRepo.findOne({ where: { id: dto.customerId }, relations: { lead: { assignedSalesAgent: true } } });
     if (!customer) throw new NotFoundException('Customer not found');
 
     const property = await this.propertyRepo.findOne({ where: { id: dto.propertyId } });
@@ -270,6 +272,40 @@ export class SalesService implements OnModuleInit {
     }
 
     await this.logAudit('SalesReservation', savedReservation.id, 'CREATE', null, savedReservation);
+
+    // Send confirmation notification
+    try {
+      const salesRep = customer.lead?.assignedSalesAgent || null;
+      const recipients: any[] = [
+        {
+          recipientName: customer.fullName,
+          emailAddress: customer.primaryEmail || undefined,
+          phoneNumber: customer.primaryPhone,
+        },
+      ];
+      if (salesRep) {
+        recipients.push({
+          recipientName: salesRep.fullName,
+          emailAddress: salesRep.email || undefined,
+          phoneNumber: salesRep.phone || undefined,
+        });
+      }
+      recipients.push({
+        recipientName: 'Sales Manager',
+        emailAddress: 'manager@ihsanproperties.com',
+      });
+
+      await this.notificationsService.sendNotification({
+        categoryCode: 'RESERVATION',
+        title: `Reservation Confirmed - #${refNo}`,
+        body: `Dear ${customer.fullName},\nYour reservation for Unit ${unit.unitCode} at Property ${property.propertyName} has been successfully confirmed. Reservation Fee: ETB ${Number(dto.reservationFee || 0).toLocaleString()}. Expiry Date: ${new Date(dto.expiryDate).toLocaleDateString()}.`,
+        referenceTypeId: 'RESERVATION',
+        referenceId: savedReservation.id,
+        recipients,
+      });
+    } catch (e) {
+      this.logger.error('Failed to send reservation confirmed notification', e);
+    }
 
     try {
       await this.brokerService.handleSalesEvent('RESERVATION_CREATED', savedReservation);

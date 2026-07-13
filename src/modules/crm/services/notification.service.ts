@@ -7,6 +7,8 @@ import { FollowupHistory } from '../entities/followup-history.entity';
 import { Lead } from '../entities/lead.entity';
 import { SalesAgent } from '../entities/sales-agent.entity';
 import { EmailService } from './email.service';
+import { Inject, forwardRef } from '@nestjs/common';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 
 @Injectable()
 export class NotificationService {
@@ -18,6 +20,8 @@ export class NotificationService {
     @InjectRepository(FollowupHistory)
     private readonly historyRepo: Repository<FollowupHistory>,
     private readonly emailService: EmailService,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly centralNotifications: NotificationsService,
   ) {}
 
   async createReminder(lead: Lead, agent: SalesAgent, reminderDatetime: Date, subject: string, message: string): Promise<FollowupReminder> {
@@ -57,6 +61,27 @@ IHSAN REMS System Mailer`;
 
       this.emailService.sendEmail(agent.email, emailSubject, emailBody).catch(err => {
         console.error('[EMAIL ERROR] Failed to send email to agent in background:', err);
+      });
+    }
+
+    // Trigger central notifications engine (Email, Telegram, InApp based on preferences)
+    if (agent) {
+      this.centralNotifications.sendNotification({
+        categoryCode: 'FOLLOWUP',
+        title: subject,
+        body: message,
+        referenceTypeId: 'LEAD',
+        referenceId: lead?.id,
+        recipients: [
+          {
+            userId: agent.id,
+            recipientName: agent.fullName,
+            emailAddress: agent.email || undefined,
+            phoneNumber: agent.phone || undefined,
+          },
+        ],
+      }).catch(err => {
+        console.error('[CENTRAL NOTIFICATION ERROR] Failed to send followup central alert:', err);
       });
     }
 

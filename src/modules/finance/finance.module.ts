@@ -12,7 +12,7 @@ import { PenaltyConfiguration } from './entities/penalty-configuration.entity';
 import { PenaltyTransaction } from './entities/penalty-transaction.entity';
 import { CustomerBalance } from './entities/customer-balance.entity';
 import { RevenueSummary } from './entities/revenue-summary.entity';
-import { NotificationTemplate } from './entities/notification-template.entity';
+import { NotificationTemplate } from '../notifications/entities/notification-template.entity';
 import { ReminderConfiguration } from './entities/reminder-configuration.entity';
 import { PaymentReminder } from './entities/payment-reminder.entity';
 import { OrganizationSettings } from './entities/organization-settings.entity';
@@ -28,10 +28,12 @@ import { FinanceService } from './services/finance.service';
 import { FinanceController } from './controllers/finance.controller';
 import { forwardRef } from '@nestjs/common';
 import { SalesModule } from '../sales/sales.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     forwardRef(() => SalesModule),
+    NotificationsModule,
     TypeOrmModule.forFeature([
       PaymentMethod,
       Payment,

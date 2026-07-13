@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LeadSource } from './entities/lead-source.entity';
 import { LeadStatus } from './entities/lead-status.entity';
@@ -48,6 +49,7 @@ import { DocumentController } from './controllers/document.controller';
 
 @Module({
   imports: [
+    forwardRef(() => NotificationsModule),
     TypeOrmModule.forFeature([
       LeadSource,
       LeadStatus,
