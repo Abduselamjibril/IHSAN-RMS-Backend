@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CrmModule } from './modules/crm/crm.module';
@@ -15,6 +15,7 @@ import { SecurityModule } from './modules/security/security.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuditLogInterceptor } from './modules/security/interceptors/audit-log.interceptor';
+import { PermissionGuard } from './modules/security/guards/permission.guard';
 
 @Module({
   imports: [
@@ -52,6 +53,10 @@ import { AuditLogInterceptor } from './modules/security/interceptors/audit-log.i
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditLogInterceptor,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: PermissionGuard,
     },
   ],
 })
