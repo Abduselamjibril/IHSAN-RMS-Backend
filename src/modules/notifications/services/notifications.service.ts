@@ -77,6 +77,10 @@ export class NotificationsService implements OnModuleInit {
         { code: 'EMAIL', name: 'Email Delivery' },
         { code: 'TELEGRAM', name: 'Telegram Messenger' },
         { code: 'INAPP', name: 'In-App Notification Center' },
+        { code: 'ALL', name: 'All Delivery Channels (Multi-Channel)' },
+        { code: 'EMAIL_TELEGRAM', name: 'Email & Telegram Only' },
+        { code: 'EMAIL_INAPP', name: 'Email & In-App Only' },
+        { code: 'TELEGRAM_INAPP', name: 'Telegram & In-App Only' },
       ];
       for (const ch of channels) {
         const exists = await this.channelRepo.findOne({ where: { channelCode: ch.code } });
@@ -236,6 +240,22 @@ export class NotificationsService implements OnModuleInit {
 
       // Resolve Delivery Channels based on preference & template rules
       let channelsToDeliver = templateChannel ? [templateChannel] : defaultChannels;
+      
+      if (templateChannel) {
+        if (templateChannel.channelCode === 'ALL') {
+          channelsToDeliver = defaultChannels.filter(c => ['EMAIL', 'TELEGRAM', 'INAPP'].includes(c.channelCode));
+        } else if (templateChannel.channelCode === 'EMAIL_TELEGRAM') {
+          channelsToDeliver = defaultChannels.filter(c => c.channelCode === 'EMAIL' || c.channelCode === 'TELEGRAM');
+        } else if (templateChannel.channelCode === 'EMAIL_INAPP') {
+          channelsToDeliver = defaultChannels.filter(c => c.channelCode === 'EMAIL' || c.channelCode === 'INAPP');
+        } else if (templateChannel.channelCode === 'TELEGRAM_INAPP') {
+          channelsToDeliver = defaultChannels.filter(c => c.channelCode === 'TELEGRAM' || c.channelCode === 'INAPP');
+        } else {
+          channelsToDeliver = [templateChannel];
+        }
+      } else {
+        channelsToDeliver = defaultChannels.filter(c => ['EMAIL', 'TELEGRAM', 'INAPP'].includes(c.channelCode));
+      }
 
       if (recDto.userId) {
         // If recipient has user ID, query preferences
@@ -250,7 +270,8 @@ export class NotificationsService implements OnModuleInit {
             if (c.channelCode === 'SMS') return pref.enableSMS;
             if (c.channelCode === 'PUSH') return pref.enablePush;
             if (c.channelCode === 'INAPP') return pref.enableInApp;
-            return true; // Keep Telegram / Whatsapp default
+            if (c.channelCode === 'TELEGRAM') return pref.enableTelegram;
+            return true;
           });
         }
       }
@@ -464,6 +485,14 @@ export class NotificationsService implements OnModuleInit {
     return this.templateRepo.save(template);
   }
 
+  async getCategories(): Promise<NotificationCategory[]> {
+    return this.categoryRepo.find();
+  }
+
+  async getChannels(): Promise<NotificationChannel[]> {
+    return this.channelRepo.find();
+  }
+
   // --- In-App Notification Inbox ---
   async getUserInbox(userId: number): Promise<any[]> {
     return this.recipientRepo.find({
@@ -527,6 +556,7 @@ export class NotificationsService implements OnModuleInit {
           enableSMS: true,
           enablePush: true,
           enableInApp: true,
+          enableTelegram: false, // Default to disabled for TELEGRAM per requirement
         });
         seeded.push(await this.prefRepo.save(item));
       }
@@ -545,6 +575,7 @@ export class NotificationsService implements OnModuleInit {
         if (item.enableSMS !== undefined) pref.enableSMS = item.enableSMS;
         if (item.enablePush !== undefined) pref.enablePush = item.enablePush;
         if (item.enableInApp !== undefined) pref.enableInApp = item.enableInApp;
+        if (item.enableTelegram !== undefined) pref.enableTelegram = item.enableTelegram;
         await this.prefRepo.save(pref);
       }
     }
@@ -621,6 +652,14 @@ export class NotificationsService implements OnModuleInit {
 
   getTelegramStatus() {
     return this.telegramService.getStatus();
+  }
+
+  async requestTelegramCode(apiId: number, apiHash: string, phoneNumber: string) {
+    return this.telegramService.requestAuthCode(apiId, apiHash, phoneNumber);
+  }
+
+  async verifyTelegramCode(phoneNumber: string, code: string, password?: string) {
+    return this.telegramService.verifyAuthCode(phoneNumber, code, password);
   }
 
   // --- Helpers ---

@@ -33,6 +33,16 @@ export class NotificationsController {
     return this.service.getDeliveryStats();
   }
 
+  @Get('categories')
+  getCategories() {
+    return this.service.getCategories();
+  }
+
+  @Get('channels')
+  getChannels() {
+    return this.service.getChannels();
+  }
+
   // --- Templates ---
   @Get('templates')
   getTemplates() {
@@ -98,5 +108,19 @@ export class NotificationsController {
     @Body() dto: { telegramApiId: number; telegramApiHash: string; telegramSessionString: string }
   ) {
     return this.service.updateTelegramConfig(dto);
+  }
+
+  @Post('telegram/request-code')
+  requestTelegramCode(
+    @Body() dto: { apiId: number; apiHash: string; phoneNumber: string }
+  ) {
+    return this.service.requestTelegramCode(dto.apiId, dto.apiHash, dto.phoneNumber);
+  }
+
+  @Post('telegram/verify-code')
+  verifyTelegramCode(
+    @Body() dto: { phoneNumber: string; code: string; password?: string }
+  ) {
+    return this.service.verifyTelegramCode(dto.phoneNumber, dto.code, dto.password);
   }
 }

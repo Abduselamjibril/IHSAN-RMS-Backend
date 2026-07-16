@@ -25,6 +25,9 @@ export class UserNotificationPreference {
   @Column({ name: 'enable_in_app', type: 'boolean', default: true })
   enableInApp: boolean;
 
+  @Column({ name: 'enable_telegram', type: 'boolean', default: false })
+  enableTelegram: boolean;
+
   @UpdateDateColumn({ name: 'updated_date', type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 }
