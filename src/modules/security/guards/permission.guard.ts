@@ -38,6 +38,18 @@ export class PermissionGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired security token');
     }
 
+    // A valid JWT alone is not enough: its server-side session must still be active.
+    // This ensures logout/revocation takes effect immediately instead of waiting for expiry.
+    const activeSession = await this.dataSource.query(
+      `SELECT 1 FROM rems_user_session
+       WHERE sessiontoken = $1 AND userid = $2 AND isactive = true
+       LIMIT 1`,
+      [token, decoded.userId]
+    );
+    if (!activeSession.length) {
+      throw new UnauthorizedException('This login session is no longer active');
+    }
+
     // Attach decoded user info to request context for controllers to use
     request.user = decoded;
 
