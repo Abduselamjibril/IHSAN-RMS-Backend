@@ -16,11 +16,23 @@ import { WorkflowModule } from './modules/workflow/workflow.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuditLogInterceptor } from './modules/security/interceptors/audit-log.interceptor';
 import { PermissionGuard } from './modules/security/guards/permission.guard';
+import { MulterModule } from '@nestjs/platform-express';
+
+const allowedUploadMimeTypes = new Set([
+  'application/pdf', 'text/plain', 'text/csv',
+  'image/jpeg', 'image/png', 'image/webp',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+    }),
+    MulterModule.register({
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+      fileFilter: (_req, file, callback) => callback(null, allowedUploadMimeTypes.has(file.mimetype)),
     }),
     CrmModule,
     PropertiesModule,

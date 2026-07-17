@@ -22,7 +22,7 @@ export class SecurityController {
     
     res.cookie('auth_token', result.token, {
       httpOnly: true,
-      secure: false, // Set to true if HTTPS, false for localhost HTTP
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -33,10 +33,11 @@ export class SecurityController {
 
   @Post('auth/logout')
   @ApiOperation({ summary: 'Terminate active session' })
-  async logout(@Headers('authorization') authHeader: string, @Res({ passthrough: true }) res: any) {
+  async logout(@Headers('authorization') authHeader: string, @Req() req: any, @Res({ passthrough: true }) res: any) {
     res.clearCookie('auth_token', { path: '/' });
-    if (!authHeader) return { success: true };
-    const token = authHeader.replace('Bearer ', '');
+    const cookieToken = (req.headers.cookie || '').split(';').map((item: string) => item.trim()).find((item: string) => item.startsWith('auth_token='))?.slice('auth_token='.length);
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.replace('Bearer ', '') : cookieToken;
+    if (!token) return { success: true };
     return this.securityService.logout(token);
   }
 

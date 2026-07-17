@@ -8,8 +8,32 @@ import { ValidationPipe } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { verifyToken, hashToken } from './modules/security/utils/security.crypto';
 
+function createRateLimiter(maxRequests: number, windowMs: number) {
+  const requests = new Map<string, { count: number; resetAt: number }>();
+  return (req: any, res: any, next: any) => {
+    const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
+    const now = Date.now();
+    const entry = requests.get(ip);
+    if (!entry || entry.resetAt <= now) {
+      requests.set(ip, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    if (entry.count >= maxRequests) {
+      res.setHeader('Retry-After', Math.ceil((entry.resetAt - now) / 1000));
+      return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+    }
+    entry.count += 1;
+    return next();
+  };
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Throttle high-risk authentication and integration operations, plus general API traffic.
+  app.use('/api/auth/login', createRateLimiter(5, 15 * 60 * 1000));
+  app.use('/api/notifications/telegram', createRateLimiter(5, 15 * 60 * 1000));
+  app.use('/api', createRateLimiter(300, 15 * 60 * 1000));
 
   // Ensure uploads directory exists
   const uploadsDir = join(__dirname, '..', 'uploads');
@@ -28,18 +52,9 @@ async function bootstrap() {
     transform: true,
   }));
 
-  // Serve static uploaded files under authorization check for sensitive subdirectories
+  // Every upload may contain business or customer data; require an active session for all files.
   app.use('/uploads', async (req: any, res: any, next: any) => {
     if (req.method === 'OPTIONS') {
-      return next();
-    }
-
-    const urlPath = req.path;
-    const isSensitive = urlPath.startsWith('/contracts') || 
-                        urlPath.startsWith('/documents') || 
-                        urlPath.startsWith('/floorplans');
-
-    if (!isSensitive) {
       return next();
     }
 
@@ -48,8 +63,6 @@ async function bootstrap() {
       const authHeader = req.headers['authorization'];
       if (authHeader && authHeader.startsWith('Bearer ')) {
         token = authHeader.replace('Bearer ', '');
-      } else if (req.query && req.query.token) {
-        token = req.query.token as string;
       } else if (req.headers.cookie) {
         const cookies = req.headers.cookie.split(';').reduce((acc: any, c: string) => {
           const parts = c.trim().split('=');
