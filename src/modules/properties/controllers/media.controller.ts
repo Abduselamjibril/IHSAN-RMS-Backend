@@ -12,6 +12,24 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { MediaService } from '../services/media.service';
 
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt'];
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 
+  'application/pdf', 'application/msword', 
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+  'application/vnd.ms-excel', 
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+  'text/csv', 'text/plain'
+];
+
+const fileFilterHelper = (req: any, file: any, cb: any) => {
+  const ext = extname(file.originalname).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.includes(ext) || !ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+    return cb(new BadRequestException(`Unsupported file type: ${ext}`), false);
+  }
+  cb(null, true);
+};
+
 @ApiTags('Properties')
 @Controller('api/property-media')
 export class MediaController {
@@ -30,6 +48,8 @@ export class MediaController {
           cb(null, `${randomName}${extname(file.originalname)}`);
         },
       }),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+      fileFilter: fileFilterHelper
     }),
   )
   async uploadPropertyMedia(
@@ -60,6 +80,8 @@ export class MediaController {
           cb(null, `${randomName}${extname(file.originalname)}`);
         },
       }),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+      fileFilter: fileFilterHelper
     }),
   )
   async uploadPropertyDocument(
@@ -88,6 +110,8 @@ export class MediaController {
           cb(null, `${randomName}${extname(file.originalname)}`);
         },
       }),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+      fileFilter: fileFilterHelper
     }),
   )
   async uploadFloorPlan(

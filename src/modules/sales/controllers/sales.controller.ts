@@ -10,9 +10,11 @@ import {
   Query,
   UseInterceptors,
   UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
+import { extname } from 'path';
 import * as fs from 'fs';
 import { ApiTags } from '@nestjs/swagger';
 import { SalesService } from '../services/sales.service';
@@ -169,16 +171,38 @@ export class SalesController {
         cb(null, dest);
       },
       filename: (req, file, cb) => {
-        cb(null, file.originalname);
+        const randomName = Array(32)
+          .fill(null)
+          .map(() => Math.round(Math.random() * 16).toString(16))
+          .join('');
+        cb(null, `${randomName}${extname(file.originalname)}`);
       }
-    })
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    fileFilter: (req, file, cb) => {
+      const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt'];
+      const allowedMimeTypes = [
+        'image/jpeg', 'image/png', 'image/gif', 
+        'application/pdf', 'application/msword', 
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+        'application/vnd.ms-excel', 
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+        'text/csv', 'text/plain'
+      ];
+      const ext = extname(file.originalname).toLowerCase();
+      if (!allowedExtensions.includes(ext) || !allowedMimeTypes.includes(file.mimetype)) {
+        return cb(new BadRequestException(`Unsupported file type: ${ext}`), false);
+      }
+      cb(null, true);
+    }
   }))
   async uploadContractFile(
     @Param('id') id: string,
     @UploadedFile() file: any,
     @Body('fileName') fileName: string,
   ) {
-    const filePath = `/uploads/contracts/${file.filename || file.originalname}`;
+    if (!file) throw new BadRequestException('File is required.');
+    const filePath = `/uploads/contracts/${file.filename}`;
     return this.service.uploadContractDocument(+id, fileName || file.originalname, filePath);
   }
 

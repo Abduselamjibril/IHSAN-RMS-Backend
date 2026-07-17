@@ -34,16 +34,25 @@ import { PermissionGuard } from './modules/security/guards/permission.guard';
     NotificationsModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get<string>('DB_HOST', 'localhost'),
-        port: configService.get<number>('DB_PORT', 5432),
-        username: configService.get<string>('DB_USERNAME', 'postgres'),
-        password: configService.get<string>('DB_PASSWORD', 'password'),
-        database: configService.get<string>('DB_DATABASE', 'ihsan_db'),
-        autoLoadEntities: true,
-        synchronize: true, // Warning: true is excellent for local dev but not recommended for production
-      }),
+      useFactory: (configService: ConfigService) => {
+        const isProduction = configService.get<string>('NODE_ENV') === 'production';
+        const dbPassword = configService.get<string>('DB_PASSWORD');
+
+        if (isProduction && (!dbPassword || dbPassword === 'password')) {
+          throw new Error('CRITICAL ERROR: DB_PASSWORD environment variable must be specified and must not be "password" in production!');
+        }
+
+        return {
+          type: 'postgres',
+          host: configService.get<string>('DB_HOST', 'localhost'),
+          port: configService.get<number>('DB_PORT', 5432),
+          username: configService.get<string>('DB_USERNAME', 'postgres'),
+          password: dbPassword || 'password',
+          database: configService.get<string>('DB_DATABASE', 'ihsan_db'),
+          autoLoadEntities: true,
+          synchronize: !isProduction,
+        };
+      },
       inject: [ConfigService],
     }),
   ],

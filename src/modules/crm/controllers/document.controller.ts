@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, Query, UseInterceptors, UploadedFile, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, UseInterceptors, UploadedFile, ParseIntPipe, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -50,13 +50,31 @@ export class DocumentController {
         const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
         cb(null, `${randomName}${extname(file.originalname)}`);
       }
-    })
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    fileFilter: (req, file, cb) => {
+      const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt'];
+      const allowedMimeTypes = [
+        'image/jpeg', 'image/png', 'image/gif', 
+        'application/pdf', 'application/msword', 
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+        'application/vnd.ms-excel', 
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+        'text/csv', 'text/plain'
+      ];
+      const ext = extname(file.originalname).toLowerCase();
+      if (!allowedExtensions.includes(ext) || !allowedMimeTypes.includes(file.mimetype)) {
+        return cb(new BadRequestException(`Unsupported file type: ${ext}`), false);
+      }
+      cb(null, true);
+    }
   }))
   async uploadDocument(
     @Param('leadId', ParseIntPipe) leadId: number,
     @UploadedFile() file: any,
     @Body() body: { category: string; expiryDate?: string; accessRole?: string },
   ) {
+    if (!file) throw new BadRequestException('File is required.');
     return this.documentService.uploadDocument(leadId, file, body);
   }
 
@@ -71,12 +89,30 @@ export class DocumentController {
         const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
         cb(null, `${randomName}${extname(file.originalname)}`);
       }
-    })
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    fileFilter: (req, file, cb) => {
+      const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt'];
+      const allowedMimeTypes = [
+        'image/jpeg', 'image/png', 'image/gif', 
+        'application/pdf', 'application/msword', 
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+        'application/vnd.ms-excel', 
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+        'text/csv', 'text/plain'
+      ];
+      const ext = extname(file.originalname).toLowerCase();
+      if (!allowedExtensions.includes(ext) || !allowedMimeTypes.includes(file.mimetype)) {
+        return cb(new BadRequestException(`Unsupported file type: ${ext}`), false);
+      }
+      cb(null, true);
+    }
   }))
   async addVersion(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: any,
   ) {
+    if (!file) throw new BadRequestException('File is required.');
     return this.documentService.addVersion(id, file);
   }
 

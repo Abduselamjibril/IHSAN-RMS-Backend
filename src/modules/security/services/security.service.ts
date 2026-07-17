@@ -11,7 +11,7 @@ import { UserSession } from '../entities/user-session.entity';
 import { LoginHistory } from '../entities/login-history.entity';
 import { PasswordHistory } from '../entities/password-history.entity';
 import { AuditLog } from '../entities/audit-log.entity';
-import { verifyPassword, hashPassword, generateToken } from '../utils/security.crypto';
+import { verifyPassword, hashPassword, generateToken, hashToken } from '../utils/security.crypto';
 import { LoginDto, CreateUserDto, UpdateUserDto, CreateRoleDto, AssignPermissionsDto } from '../dto/security.dto';
 
 @Injectable()
@@ -29,24 +29,27 @@ export class SecurityService {
     @InjectRepository(AuditLog) private readonly auditLogRepo: Repository<AuditLog>,
   ) {}
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, reqIP?: string, reqUserAgent?: string) {
     const user = await this.userRepo.findOne({
       where: { username: dto.username },
       relations: { userRoles: { role: true } },
     });
 
+    const ip = reqIP || dto.ipAddress || '127.0.0.1';
+    const userAgent = reqUserAgent || 'Unknown';
+
     if (!user) {
-      await this.logLogin(null, dto.username, 'FAILED', 'User not found', dto);
+      await this.logLogin(null, dto.username, 'FAILED', 'User not found', ip);
       throw new UnauthorizedException('Invalid username or password');
     }
 
     if (!user.isActive) {
-      await this.logLogin(user.userId, dto.username, 'FAILED', 'Account is deactivated', dto);
+      await this.logLogin(user.userId, dto.username, 'FAILED', 'Account is deactivated', ip);
       throw new UnauthorizedException('Account is deactivated');
     }
 
     if (user.isLocked) {
-      await this.logLogin(user.userId, dto.username, 'LOCKED', 'Account is locked', dto);
+      await this.logLogin(user.userId, dto.username, 'LOCKED', 'Account is locked', ip);
       throw new UnauthorizedException('Account is locked. Contact administrator.');
     }
 
@@ -66,10 +69,10 @@ export class SecurityService {
       if (failedAttempts >= 4) {
         user.isLocked = true;
         await this.userRepo.save(user);
-        await this.logLogin(user.userId, dto.username, 'LOCKED', 'Account locked due to consecutive failures', dto);
+        await this.logLogin(user.userId, dto.username, 'LOCKED', 'Account locked due to consecutive failures', ip);
         throw new UnauthorizedException('Account locked due to too many failed attempts.');
       } else {
-        await this.logLogin(user.userId, dto.username, 'FAILED', 'Incorrect password', dto);
+        await this.logLogin(user.userId, dto.username, 'FAILED', 'Incorrect password', ip);
         throw new UnauthorizedException('Invalid username or password');
       }
     }
@@ -107,20 +110,57 @@ export class SecurityService {
 
     const token = generateToken(payload);
 
-    // Register active user session
+    // Derive device and browser parameters server-side
+    let derivedBrowser = 'Unknown';
+    let derivedDevice = 'Desktop';
+    let derivedDeviceName = 'Unknown Device';
+
+    if (userAgent) {
+      if (userAgent.includes('Firefox')) {
+        derivedBrowser = 'Firefox';
+      } else if (userAgent.includes('Chrome')) {
+        derivedBrowser = 'Chrome';
+      } else if (userAgent.includes('Safari')) {
+        derivedBrowser = 'Safari';
+      } else if (userAgent.includes('Edge')) {
+        derivedBrowser = 'Edge';
+      } else if (userAgent.includes('Postman')) {
+        derivedBrowser = 'PostmanClient';
+      }
+
+      if (userAgent.includes('Mobi') || userAgent.includes('Android') || userAgent.includes('iPhone')) {
+        derivedDevice = 'Mobile';
+      } else if (userAgent.includes('Tablet') || userAgent.includes('iPad')) {
+        derivedDevice = 'Tablet';
+      }
+
+      if (userAgent.includes('iPhone')) {
+        derivedDeviceName = 'iPhone';
+      } else if (userAgent.includes('Android')) {
+        derivedDeviceName = 'Android Device';
+      } else if (userAgent.includes('Windows')) {
+        derivedDeviceName = 'Windows PC';
+      } else if (userAgent.includes('Macintosh')) {
+        derivedDeviceName = 'Mac';
+      } else if (userAgent.includes('Linux')) {
+        derivedDeviceName = 'Linux PC';
+      }
+    }
+
+    // Register active user session (storing SHA-256 token hash)
     const session = this.sessionRepo.create({
       userId: user.userId,
-      sessionToken: token,
-      deviceName: dto.deviceName,
-      deviceType: dto.deviceType,
-      browserName: dto.browserName,
-      ipAddress: dto.ipAddress,
+      sessionToken: hashToken(token),
+      deviceName: derivedDeviceName,
+      deviceType: derivedDevice,
+      browserName: derivedBrowser,
+      ipAddress: ip,
       loginDate: new Date(),
       isActive: true,
     });
     await this.sessionRepo.save(session);
 
-    await this.logLogin(user.userId, dto.username, 'SUCCESS', null, dto);
+    await this.logLogin(user.userId, dto.username, 'SUCCESS', null, ip);
 
     return {
       token,
@@ -132,12 +172,13 @@ export class SecurityService {
         emailAddress: user.emailAddress,
         roles: payload.roles,
         permissions,
+        forcePasswordChange: user.forcePasswordChange,
       },
     };
   }
 
   async logout(token: string) {
-    const session = await this.sessionRepo.findOne({ where: { sessionToken: token, isActive: true } });
+    const session = await this.sessionRepo.findOne({ where: { sessionToken: hashToken(token), isActive: true } });
     if (session) {
       session.isActive = false;
       session.logoutDate = new Date();
@@ -146,13 +187,13 @@ export class SecurityService {
     return { success: true };
   }
 
-  private async logLogin(userId: string | null, username: string, result: string, reason: string | null, dto: LoginDto) {
+  private async logLogin(userId: string | null, username: string, result: string, reason: string | null, ipAddress: string) {
     const history = this.loginHistoryRepo.create({
       userId,
       username,
       loginDate: new Date(),
-      ipAddress: dto.ipAddress,
-      deviceName: dto.deviceName || 'Unknown',
+      ipAddress,
+      deviceName: 'ServerDerived',
       loginResultId: result,
       failureReason: reason,
     });
@@ -220,6 +261,7 @@ export class SecurityService {
 
     if (dto.password) {
       user.passwordHash = hashPassword(dto.password);
+      user.forcePasswordChange = false;
       // Log to password history
       const history = this.passwordHistoryRepo.create({
         userId: user.userId,

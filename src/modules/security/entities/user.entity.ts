@@ -45,6 +45,9 @@ export class User {
   @Column({ name: 'islocked', type: 'boolean', default: false })
   isLocked: boolean;
 
+  @Column({ name: 'forcepasswordchange', type: 'boolean', default: false })
+  forcePasswordChange: boolean;
+
   @Column({ name: 'lastlogindate', type: 'timestamp', nullable: true })
   lastLoginDate: Date;
 

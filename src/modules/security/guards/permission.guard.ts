@@ -1,6 +1,6 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { verifyToken } from '../utils/security.crypto';
+import { verifyToken, hashToken } from '../utils/security.crypto';
 import { SEEDED_PERMISSIONS } from '../../../../seeded-permissions';
 
 @Injectable()
@@ -16,13 +16,12 @@ export class PermissionGuard implements CanActivate {
       return true; // Bypasses if not a registered route
     }
 
-    // 1. Find matching seeded permission rule
-    const seedPerm = SEEDED_PERMISSIONS.find(
-      (sp) => sp.method === method && sp.path === routePath
-    );
-
-    // If endpoint is not registered in seeded-permissions, it is public
-    if (!seedPerm) {
+    // 1. Check for intentionally public endpoints (Login, Root Health Check, Swagger Documentation)
+    if (
+      (method === 'POST' && routePath === '/api/auth/login') ||
+      (method === 'GET' && routePath === '/') ||
+      routePath.startsWith('/api/docs')
+    ) {
       return true;
     }
 
@@ -38,19 +37,19 @@ export class PermissionGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired security token');
     }
 
-    // A valid JWT alone is not enough: its server-side session must still be active.
-    // This ensures logout/revocation takes effect immediately instead of waiting for expiry.
+    // Check session validity using hashed token
+    const hashedSessionToken = hashToken(token);
     const activeSession = await this.dataSource.query(
       `SELECT 1 FROM rems_user_session
        WHERE sessiontoken = $1 AND userid = $2 AND isactive = true
        LIMIT 1`,
-      [token, decoded.userId]
+      [hashedSessionToken, decoded.userId]
     );
     if (!activeSession.length) {
       throw new UnauthorizedException('This login session is no longer active');
     }
 
-    // Attach decoded user info to request context for controllers to use
+    // Attach decoded user info to request context
     request.user = decoded;
 
     // 3. Superadmin bypass
@@ -58,7 +57,31 @@ export class PermissionGuard implements CanActivate {
       return true;
     }
 
-    // 4. Query database for user permissions matrix mappings
+    // 4. Authenticated-only base endpoints (allowing users to access their own notifications, inbox, and settings)
+    if (
+      (method === 'POST' && routePath === '/api/auth/logout') ||
+      (method === 'GET' && routePath === '/api/notifications/inbox') ||
+      (method === 'GET' && routePath === '/api/notifications/unread-count') ||
+      (method === 'POST' && routePath === '/api/notifications/read') ||
+      (method === 'GET' && routePath === '/api/notifications/preferences') ||
+      (method === 'POST' && routePath === '/api/notifications/preferences') ||
+      (method === 'PUT' && routePath === '/api/users/:id' && decoded.userId === request.params.id)
+    ) {
+      return true;
+    }
+
+    // 5. Find matching seeded permission rule
+    const seedPerm = SEEDED_PERMISSIONS.find(
+      (sp) => sp.method === method && sp.path === routePath
+    );
+
+    // Deny by default: If the endpoint is NOT registered in seeded-permissions,
+    // and is not in the public or authenticated-only lists, reject it.
+    if (!seedPerm) {
+      throw new ForbiddenException(`Access Denied: Unmapped API route path ${routePath} is protected.`);
+    }
+
+    // 6. Query database for user permissions matrix mappings
     const userPermissions = await this.dataSource.query(
       `SELECT p.permissioncode as code, 
               rp.canview as "canView", 
@@ -79,7 +102,7 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenException(`Access Denied: You do not possess capability mapping for ${seedPerm.name}`);
     }
 
-    // 5. Verify action capability switch
+    // 7. Verify action capability switch
     let hasAccess = false;
     if (method === 'GET') {
       hasAccess = userPerm.canView;

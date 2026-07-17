@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Headers, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Headers, UnauthorizedException, Req, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SecurityService } from '../services/security.service';
 import { LoginDto, CreateUserDto, UpdateUserDto, CreateRoleDto, AssignPermissionsDto } from '../dto/security.dto';
@@ -10,13 +10,31 @@ export class SecurityController {
 
   @Post('auth/login')
   @ApiOperation({ summary: 'Authenticate user and issue JWT session token' })
-  async login(@Body() dto: LoginDto) {
-    return this.securityService.login(dto);
+  async login(@Body() dto: LoginDto, @Req() req: any, @Res({ passthrough: true }) res: any) {
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    let ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '127.0.0.1';
+    if (Array.isArray(ip)) {
+      ip = ip[0];
+    } else if (typeof ip === 'string') {
+      ip = ip.split(',')[0].trim();
+    }
+    const result = await this.securityService.login(dto, ip, userAgent);
+    
+    res.cookie('auth_token', result.token, {
+      httpOnly: true,
+      secure: false, // Set to true if HTTPS, false for localhost HTTP
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    return result;
   }
 
   @Post('auth/logout')
   @ApiOperation({ summary: 'Terminate active session' })
-  async logout(@Headers('authorization') authHeader: string) {
+  async logout(@Headers('authorization') authHeader: string, @Res({ passthrough: true }) res: any) {
+    res.clearCookie('auth_token', { path: '/' });
     if (!authHeader) return { success: true };
     const token = authHeader.replace('Bearer ', '');
     return this.securityService.logout(token);

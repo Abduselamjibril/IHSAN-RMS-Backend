@@ -1,10 +1,15 @@
 import * as crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ihsan_rems_super_secret_key_2026_safe';
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('CRITICAL ERROR: JWT_SECRET environment variable is missing in production environment!');
+  process.exit(1);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || 'ihsan_rems_rotated_high_entropy_fallback_key_9381048_prod_safe';
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 600000, 64, 'sha512').toString('hex');
   return `${salt}:${hash}`;
 }
 
@@ -13,7 +18,13 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   const parts = storedHash.split(':');
   if (parts.length !== 2) return false;
   const [salt, originalHash] = parts;
-  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+
+  // Verify using stronger iterations (600,000)
+  let hash = crypto.pbkdf2Sync(password, salt, 600000, 64, 'sha512').toString('hex');
+  if (hash === originalHash) return true;
+
+  // Fallback to legacy iterations (1,000) for backward compatibility
+  hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
   return hash === originalHash;
 }
 
@@ -57,4 +68,9 @@ export function verifyToken(token: string): any {
   } catch (e) {
     return null;
   }
+}
+
+export function hashToken(token: string): string {
+  if (!token) return '';
+  return crypto.createHash('sha256').update(token).digest('hex');
 }

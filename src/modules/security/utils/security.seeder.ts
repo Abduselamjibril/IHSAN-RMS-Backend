@@ -119,6 +119,11 @@ export class SecuritySeeder {
     // 4. Seed Default Admin User
     let adminUser = await this.userRepo.findOne({ where: { username: 'admin' } });
     if (!adminUser) {
+      const finalPassword = process.env.ADMIN_PASSWORD;
+      if (!finalPassword) {
+        throw new Error('CRITICAL ERROR: ADMIN_PASSWORD environment variable is missing from environment configurations. Refusing to seed default admin.');
+      }
+
       adminUser = this.userRepo.create({
         employeeCode: 'EMP-0001',
         username: 'admin',
@@ -126,13 +131,14 @@ export class SecuritySeeder {
         lastName: 'Administrator',
         emailAddress: 'admin@ihsanrems.com',
         phoneNumber: '+251911000000',
-        passwordHash: hashPassword('Admin@123'),
+        passwordHash: hashPassword(finalPassword),
         isActive: true,
         isLocked: false,
+        forcePasswordChange: true,
         createdBy: 'SEEDER',
       });
       adminUser = await this.userRepo.save(adminUser);
-      this.logger.log('Created default admin user (username: admin, password: Admin@123)');
+      this.logger.log('Created default admin user (username: admin) using password from environment configuration.');
 
       // Link User to SYS_ADMIN Role
       const userRoleRelation = this.userRoleRepo.create({

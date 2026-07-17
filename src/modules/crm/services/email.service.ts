@@ -28,6 +28,9 @@ export class EmailService {
           host,
           port,
           secure,
+          pool: true,
+          maxConnections: 3,
+          maxMessages: 100,
         };
 
         if (user && pass) {
