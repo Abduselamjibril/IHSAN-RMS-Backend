@@ -62,7 +62,7 @@ const allowedUploadMimeTypes = new Set([
           password: dbPassword || 'password',
           database: configService.get<string>('DB_DATABASE', 'ihsan_db'),
           autoLoadEntities: true,
-          synchronize: !isProduction,
+          synchronize: true,
         };
       },
       inject: [ConfigService],
