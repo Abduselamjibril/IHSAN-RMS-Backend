@@ -117,21 +117,19 @@ async function bootstrap() {
     credentials: true,
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    // Swagger Configuration
-    const config = new DocumentBuilder()
-      .setTitle('IHSAN REMS API')
-      .setDescription('Real Estate Management System (REMS) API for IHSAN Properties and Business Service PLC')
-      .setVersion('1.0')
-      .addTag('Properties', 'Property & Inventory Management Module')
-      .addTag('CRM', 'Customer Relationship Management Module')
-      .addBearerAuth()
-      .build();
+  // Swagger Configuration
+  const config = new DocumentBuilder()
+    .setTitle('IHSAN REMS API')
+    .setDescription('Real Estate Management System (REMS) API for IHSAN Properties and Business Service PLC')
+    .setVersion('1.0')
+    .addTag('Properties', 'Property & Inventory Management Module')
+    .addTag('CRM', 'Customer Relationship Management Module')
+    .addBearerAuth()
+    .build();
 
-    const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('api/docs', app, document);
-    console.log(`📖 Swagger API Docs available at http://localhost:${process.env.PORT ?? 3000}/api/docs`);
-  }
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document);
+  console.log(`📖 Swagger API Docs available at http://localhost:${process.env.PORT ?? 3000}/api/docs`);
   await app.listen(process.env.PORT ?? 3000);
   console.log(`🚀 IHSAN REMS API running on http://localhost:${process.env.PORT ?? 3000}`);
 }
