@@ -111,7 +111,7 @@ async function bootstrap() {
 
   // Allow Angular dev server at :4200 to call this API
   app.enableCors({
-    origin: ['http://localhost:4200', 'http://127.0.0.1:56050', 'http://localhost:62159'],
+    origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
