@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Patch, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, Patch, Delete, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { NotificationsService } from '../services/notifications.service';
 import { NotificationsSchedulerService } from '../services/notifications-scheduler.service';
@@ -61,35 +61,29 @@ export class NotificationsController {
 
   // --- In-App Inbox ---
   @Get('inbox')
-  getUserInbox(@Query('userId') userId: string) {
-    // Default to User ID 1 if not specified
-    const targetUserId = userId ? +userId : 1;
-    return this.service.getUserInbox(targetUserId);
+  getUserInbox(@Req() req: any) {
+    return this.service.getUserInbox(Number(req.user.userId));
   }
 
   @Get('unread-count')
-  getUnreadCount(@Query('userId') userId: string) {
-    const targetUserId = userId ? +userId : 1;
-    return this.service.getUnreadCount(targetUserId);
+  getUnreadCount(@Req() req: any) {
+    return this.service.getUnreadCount(Number(req.user.userId));
   }
 
   @Post('read')
-  markAsRead(@Query('userId') userId: string, @Body('recipientId') recipientId?: number) {
-    const targetUserId = userId ? +userId : 1;
-    return this.service.markAsRead(targetUserId, recipientId);
+  markAsRead(@Req() req: any, @Body('recipientId') recipientId?: number) {
+    return this.service.markAsRead(Number(req.user.userId), recipientId);
   }
 
   // --- Preferences ---
   @Get('preferences')
-  getUserPreferences(@Query('userId') userId: string) {
-    const targetUserId = userId ? +userId : 1;
-    return this.service.getUserPreferences(targetUserId);
+  getUserPreferences(@Req() req: any) {
+    return this.service.getUserPreferences(Number(req.user.userId));
   }
 
   @Post('preferences')
-  updateUserPreferences(@Query('userId') userId: string, @Body('preferences') preferences: any[]) {
-    const targetUserId = userId ? +userId : 1;
-    return this.service.updateUserPreferences(targetUserId, preferences);
+  updateUserPreferences(@Req() req: any, @Body('preferences') preferences: any[]) {
+    return this.service.updateUserPreferences(Number(req.user.userId), preferences);
   }
 
   // --- Telegram Configurations & Actions ---

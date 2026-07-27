@@ -27,11 +27,11 @@ export class PermissionGuard implements CanActivate {
 
     // 2. Validate token
     const authHeader = headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const cookieToken = (headers['cookie'] || '').split(';').map((item: string) => item.trim()).find((item: string) => item.startsWith('auth_token='))?.slice('auth_token='.length);
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.replace('Bearer ', '') : cookieToken;
+    if (!token) {
       throw new UnauthorizedException('Authorization credentials not provided');
     }
-
-    const token = authHeader.replace('Bearer ', '');
     const decoded = verifyToken(token);
     if (!decoded || !decoded.userId) {
       throw new UnauthorizedException('Invalid or expired security token');
@@ -60,11 +60,11 @@ export class PermissionGuard implements CanActivate {
     // 4. Authenticated-only base endpoints (allowing users to access their own notifications, inbox, and settings)
     if (
       (method === 'POST' && routePath === '/api/auth/logout') ||
-      (method === 'GET' && routePath === '/api/notifications/inbox') ||
-      (method === 'GET' && routePath === '/api/notifications/unread-count') ||
-      (method === 'POST' && routePath === '/api/notifications/read') ||
-      (method === 'GET' && routePath === '/api/notifications/preferences') ||
-      (method === 'POST' && routePath === '/api/notifications/preferences') ||
+      ((method === 'GET' && routePath === '/api/notifications/inbox') && (!request.query.userId || String(decoded.userId) === String(request.query.userId))) ||
+      ((method === 'GET' && routePath === '/api/notifications/unread-count') && (!request.query.userId || String(decoded.userId) === String(request.query.userId))) ||
+      ((method === 'POST' && routePath === '/api/notifications/read') && (!request.query.userId || String(decoded.userId) === String(request.query.userId))) ||
+      ((method === 'GET' && routePath === '/api/notifications/preferences') && (!request.query.userId || String(decoded.userId) === String(request.query.userId))) ||
+      ((method === 'POST' && routePath === '/api/notifications/preferences') && (!request.query.userId || String(decoded.userId) === String(request.query.userId))) ||
       (method === 'PUT' && routePath === '/api/users/:id' && decoded.userId === request.params.id)
     ) {
       return true;

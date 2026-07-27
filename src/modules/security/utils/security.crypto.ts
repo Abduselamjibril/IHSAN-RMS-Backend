@@ -1,11 +1,14 @@
 import * as crypto from 'crypto';
+import { config as loadEnvironment } from 'dotenv';
 
-if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
-  console.error('CRITICAL ERROR: JWT_SECRET environment variable is missing in production environment!');
-  process.exit(1);
+// Load local configuration before this module reads its mandatory signing secret.
+loadEnvironment();
+
+if (!process.env.JWT_SECRET) {
+  throw new Error('CRITICAL ERROR: JWT_SECRET environment variable is required. Refusing to start without it.');
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ihsan_rems_rotated_high_entropy_fallback_key_9381048_prod_safe';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
