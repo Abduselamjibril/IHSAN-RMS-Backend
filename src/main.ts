@@ -24,7 +24,6 @@ async function bootstrap() {
   // Global request DTO validation and sanitization
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
-    forbidNonWhitelisted: true,
     transform: true,
   }));
 
