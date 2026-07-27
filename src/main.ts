@@ -11,6 +11,10 @@ import { verifyToken, hashToken } from './modules/security/utils/security.crypto
 function createRateLimiter(maxRequests: number, windowMs: number) {
   const requests = new Map<string, { count: number; resetAt: number }>();
   return (req: any, res: any, next: any) => {
+    // Let CORS preflight requests pass through without rate limiting
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
     const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
     const now = Date.now();
     const entry = requests.get(ip);
