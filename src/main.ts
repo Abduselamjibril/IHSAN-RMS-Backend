@@ -7,6 +7,16 @@ import * as fs from 'fs';
 import { ValidationPipe } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { verifyToken, hashToken } from './modules/security/utils/security.crypto';
+import { allowSwaggerDtoProperties } from './common/validation/dto-whitelist';
+
+class ContractValidationPipe extends ValidationPipe {
+  async transform(value: unknown, metadata: any) {
+    if (metadata.type === 'body') {
+      allowSwaggerDtoProperties(metadata.metatype);
+    }
+    return super.transform(value, metadata);
+  }
+}
 
 function createRateLimiter(maxRequests: number, windowMs: number) {
   const requests = new Map<string, { count: number; resetAt: number }>();
@@ -49,9 +59,11 @@ async function bootstrap() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  // Global request DTO validation and sanitization
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
+  // Keep DTO validation enabled. Whitelisting is temporarily disabled because several
+  // existing CRUD DTOs use Swagger metadata only and would otherwise lose their fields.
+  // Re-enable it after those DTOs have class-validator decorators on every accepted field.
+  app.useGlobalPipes(new ContractValidationPipe({
+    whitelist: false,
     transform: true,
   }));
 

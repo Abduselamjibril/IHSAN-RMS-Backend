@@ -20,9 +20,12 @@ export class SecurityController {
     }
     const result = await this.securityService.login(dto, ip, userAgent);
     
+    // Local Docker development is served over HTTP, while deployed environments
+    // must set COOKIE_SECURE=true behind HTTPS.
+    const secureCookie = process.env.COOKIE_SECURE !== 'false';
     res.cookie('auth_token', result.token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: secureCookie,
       sameSite: 'lax',
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days

@@ -1,3 +1,6 @@
+import { AllowProperties } from '../../../common/validation/dto-whitelist';
+
+@AllowProperties('campaignCode', 'campaignName', 'campaignType', 'campaignObjective', 'startDate', 'endDate', 'budgetAmount', 'targetAudience', 'campaignStatus')
 export class CreateCampaignDto {
   campaignCode: string;
   campaignName: string;
@@ -10,6 +13,7 @@ export class CreateCampaignDto {
   campaignStatus?: string;
 }
 
+@AllowProperties('campaignCode', 'campaignName', 'campaignType', 'campaignObjective', 'startDate', 'endDate', 'budgetAmount', 'targetAudience', 'campaignStatus')
 export class UpdateCampaignDto {
   campaignCode?: string;
   campaignName?: string;
@@ -22,6 +26,7 @@ export class UpdateCampaignDto {
   campaignStatus?: string;
 }
 
+@AllowProperties('campaignId', 'advertisementCode', 'advertisementTitle', 'advertisementChannel', 'advertisementContent', 'startDate', 'endDate', 'plannedBudget', 'advertisementStatus')
 export class CreateAdvertisementDto {
   campaignId: number;
   advertisementCode?: string;
@@ -34,6 +39,7 @@ export class CreateAdvertisementDto {
   advertisementStatus?: string;
 }
 
+@AllowProperties('expenseDate', 'expenseType', 'expenseAmount', 'vendorName', 'paymentReference', 'remarks')
 export class RecordExpenseDto {
   expenseDate: string;
   expenseType?: string;
@@ -43,6 +49,7 @@ export class RecordExpenseDto {
   remarks?: string;
 }
 
+@AllowProperties('performanceDate', 'impressions', 'clicks', 'inquiries', 'leadsGenerated', 'conversions', 'revenueGenerated')
 export class RecordPerformanceDto {
   performanceDate?: string;
   impressions?: number;
@@ -53,6 +60,7 @@ export class RecordPerformanceDto {
   revenueGenerated?: number;
 }
 
+@AllowProperties('leadId', 'campaignId', 'leadSourceId', 'advertisementId', 'leadScore', 'conversionProbability', 'acquisitionCost')
 export class TrackLeadDto {
   leadId: number;
   campaignId?: number;
