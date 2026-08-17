@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CustomerDocument } from '../entities/customer-document.entity';
@@ -22,6 +22,14 @@ export class DocumentService {
   ) {}
 
   async findAll(query: any): Promise<{ data: CustomerDocument[]; total: number }> {
+    // Automatically update expired status for documents whose expiryDate has passed
+    const now = new Date();
+    await this.documentRepo.createQueryBuilder()
+      .update(CustomerDocument)
+      .set({ isExpired: true })
+      .where('expiry_date < :now AND is_expired = false', { now })
+      .execute();
+
     const qb = this.documentRepo.createQueryBuilder('doc')
       .leftJoinAndSelect('doc.lead', 'lead')
       .leftJoinAndSelect('doc.versions', 'versions')
@@ -46,6 +54,21 @@ export class DocumentService {
 
     const [data, total] = await qb.getManyAndCount();
     return { data, total };
+  }
+
+  validateRoleAccess(doc: CustomerDocument, userRole: string = 'Sales') {
+    const requiredRole = (doc.accessRole || 'General').toLowerCase();
+    const currentRole = (userRole || 'Sales').toLowerCase();
+
+    if (currentRole.includes('admin') || currentRole.includes('system')) {
+      return true;
+    }
+
+    if (requiredRole === 'legal' && !currentRole.includes('legal')) {
+      throw new ForbiddenException(`Access Restricted: This document requires "${doc.accessRole}" permission.`);
+    }
+
+    return true;
   }
 
   async findOne(id: number): Promise<CustomerDocument> {
@@ -129,6 +152,31 @@ export class DocumentService {
       where: { document: { id } },
       order: { versionNumber: 'DESC' },
     });
+  }
+
+  async restoreVersion(id: number, targetVersionId: number, userId: number = 1): Promise<CustomerDocument> {
+    const doc = await this.findOne(id);
+    const targetVersion = await this.versionRepo.findOne({ where: { id: targetVersionId, document: { id } } });
+    if (!targetVersion) {
+      throw new NotFoundException(`Document version with ID ${targetVersionId} not found`);
+    }
+
+    const maxVersion = doc.versions.reduce((max, v) => (v.versionNumber > max ? v.versionNumber : max), 0);
+
+    const newVersion = new CustomerDocumentVersion();
+    newVersion.document = doc;
+    newVersion.versionNumber = maxVersion + 1;
+    newVersion.fileName = targetVersion.fileName;
+    newVersion.filePath = targetVersion.filePath;
+    newVersion.fileSize = targetVersion.fileSize;
+    newVersion.mimeType = targetVersion.mimeType;
+    newVersion.uploadedBy = userId;
+    await this.versionRepo.save(newVersion);
+
+    // Audit log
+    await this.logAccess(doc.id, `Restore (v${targetVersion.versionNumber} -> v${newVersion.versionNumber})`, userId);
+
+    return this.findOne(doc.id);
   }
 
   async logAccess(docId: number, action: string, performedBy: number): Promise<CustomerDocumentAccessLog> {

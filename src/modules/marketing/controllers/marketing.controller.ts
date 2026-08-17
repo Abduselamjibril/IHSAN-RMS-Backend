@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { MarketingService } from '../services/marketing.service';
@@ -146,26 +147,39 @@ export class MarketingController {
 
   // --- Reports & Dashboards ---
   @Get('reports/performance')
-  @ApiOperation({ summary: 'Get campaign performance reports (VW)' })
-  async getCampaignPerformanceReport() {
-    return this.marketingService.getCampaignPerformanceReport();
+  @ApiOperation({ summary: 'Get campaign performance reports' })
+  async getCampaignPerformanceReport(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('campaignId') campaignId?: number,
+  ) {
+    return this.marketingService.getCampaignPerformanceReport(startDate, endDate, campaignId);
   }
 
   @Get('reports/lead-sources')
-  @ApiOperation({ summary: 'Get lead source analysis reports (VW)' })
-  async getLeadSourceAnalysisReport() {
-    return this.marketingService.getLeadSourceAnalysisReport();
+  @ApiOperation({ summary: 'Get lead source analysis reports' })
+  async getLeadSourceAnalysisReport(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.marketingService.getLeadSourceAnalysisReport(startDate, endDate);
   }
 
   @Get('reports/dashboard/kpis')
   @ApiOperation({ summary: 'Get marketing dashboard executive KPIs' })
-  async getDashboardKpis() {
-    return this.marketingService.getDashboardKpis();
+  async getDashboardKpis(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.marketingService.getDashboardKpis(startDate, endDate);
   }
 
   @Get('reports/dashboard/charts')
   @ApiOperation({ summary: 'Get marketing dashboard chart metrics' })
-  async getDashboardCharts() {
-    return this.marketingService.getDashboardCharts();
+  async getDashboardCharts(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.marketingService.getDashboardCharts(startDate, endDate);
   }
 }

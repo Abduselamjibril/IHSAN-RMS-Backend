@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Opportunity } from '../entities/opportunity.entity';
@@ -290,6 +290,54 @@ export class OpportunityService {
       oppNote.isInternal = true;
       await this.noteRepo.save(oppNote);
     }
+
+    return saved;
+  }
+
+  async reopenOpportunity(id: number, reason: string): Promise<Opportunity> {
+    const opp = await this.opportunityRepo.findOne({
+      where: { id, isDeleted: false },
+      relations: { opportunityStage: true },
+    });
+    if (!opp) {
+      throw new NotFoundException(`Opportunity with ID ${id} not found`);
+    }
+
+    if (!reason || !reason.trim()) {
+      throw new BadRequestException('A reason is required to reopen a Lost opportunity.');
+    }
+
+    let reopenStage = await this.stageRepo.findOne({ where: { stageName: 'Qualified' } });
+    if (!reopenStage) {
+      reopenStage = await this.stageRepo.findOne({ where: { sortOrder: 2 } });
+    }
+
+    const prevStageName = opp.opportunityStage ? opp.opportunityStage.stageName : 'Lost';
+    opp.opportunityStage = reopenStage;
+    opp.probabilityPercent = reopenStage ? Number(reopenStage.probabilityPercent) : 25.0;
+    opp.isLost = false;
+    opp.isWon = false;
+    opp.lossReason = null;
+    opp.actualCloseDate = null;
+    opp.remarks = `Reopened (Reason: ${reason.trim()}). ${opp.remarks || ''}`;
+
+    const saved = await this.opportunityRepo.save(opp);
+
+    // Create activity audit
+    const act = new OpportunityActivity();
+    act.opportunity = saved;
+    act.activityType = 'System';
+    act.activityDate = new Date();
+    act.subject = 'Opportunity Reopened';
+    act.description = `Opportunity reopened from "${prevStageName}" to "${reopenStage?.stageName}". Reason: ${reason.trim()}`;
+    await this.activityRepo.save(act);
+
+    // Create internal note
+    const oppNote = new OpportunityNote();
+    oppNote.opportunity = saved;
+    oppNote.note = `Reopen reason: ${reason.trim()}`;
+    oppNote.isInternal = true;
+    await this.noteRepo.save(oppNote);
 
     return saved;
   }

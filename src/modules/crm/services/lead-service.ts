@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as ExcelJS from 'exceljs';
 import { Lead } from '../entities/lead.entity';
 import { LeadSource } from '../entities/lead-source.entity';
 import { LeadStatus } from '../entities/lead-status.entity';
@@ -10,8 +11,10 @@ import { LeadNote } from '../entities/lead-note.entity';
 import { LeadContact } from '../entities/lead-contact.entity';
 import { Communication } from '../entities/communication.entity';
 import { CommunicationAttachment } from '../entities/communication-attachment.entity';
+import { CommunicationAudit } from '../entities/communication-audit.entity';
 import { Opportunity } from '../entities/opportunity.entity';
 import { NotificationService } from './notification.service';
+import { DocumentService } from './document.service';
 import { CreateLeadDto } from '../dto/create-lead.dto';
 import { UpdateLeadDto } from '../dto/update-lead.dto';
 import { AddActivityDto } from '../dto/add-activity.dto';
@@ -37,23 +40,52 @@ export class LeadService {
     private readonly communicationRepo: Repository<Communication>,
     @InjectRepository(CommunicationAttachment)
     private readonly attachmentRepo: Repository<CommunicationAttachment>,
+    @InjectRepository(CommunicationAudit)
+    private readonly commAuditRepo: Repository<CommunicationAudit>,
     @InjectRepository(Opportunity)
     private readonly opportunityRepo: Repository<Opportunity>,
     private readonly notificationService: NotificationService,
-  ) {}
+    private readonly documentService: DocumentService,
+  ) { }
 
   async create(createLeadDto: CreateLeadDto): Promise<Lead> {
-    if (!createLeadDto.fullName) {
-      throw new BadRequestException('Full name is required');
+    if (!createLeadDto.fullName || !createLeadDto.fullName.trim()) {
+      throw new BadRequestException('Full Name is required');
     }
-    if (!createLeadDto.primaryPhone) {
-      throw new BadRequestException('Primary phone number is required');
+    if (!createLeadDto.primaryPhone || !createLeadDto.primaryPhone.trim()) {
+      throw new BadRequestException('Phone number is required');
+    }
+    if (!createLeadDto.leadSourceId || +createLeadDto.leadSourceId === 0) {
+      throw new BadRequestException('Lead Source is required');
+    }
+    if (!createLeadDto.interestedPropertyType || !createLeadDto.interestedPropertyType.trim()) {
+      throw new BadRequestException('Interested Project is required');
+    }
+
+    // Email format validation
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (createLeadDto.primaryEmail && !emailRegex.test(createLeadDto.primaryEmail.trim())) {
+      throw new BadRequestException('Invalid primary email format');
+    }
+    if (createLeadDto.secondaryEmail && !emailRegex.test(createLeadDto.secondaryEmail.trim())) {
+      throw new BadRequestException('Invalid secondary email format');
+    }
+
+    // Budget range validation
+    if (
+      createLeadDto.budgetMin !== undefined &&
+      createLeadDto.budgetMin !== null &&
+      createLeadDto.budgetMax !== undefined &&
+      createLeadDto.budgetMax !== null &&
+      +createLeadDto.budgetMax < +createLeadDto.budgetMin
+    ) {
+      throw new BadRequestException('Budget Max must be greater than or equal to Budget Min.');
     }
 
     const lead = new Lead();
-    lead.fullName = createLeadDto.fullName;
+    lead.fullName = createLeadDto.fullName.trim();
     lead.gender = createLeadDto.gender as any;
-    lead.primaryPhone = createLeadDto.primaryPhone;
+    lead.primaryPhone = createLeadDto.primaryPhone.trim();
     lead.secondaryPhone = createLeadDto.secondaryPhone as any;
     lead.primaryEmail = createLeadDto.primaryEmail as any;
     lead.secondaryEmail = createLeadDto.secondaryEmail as any;
@@ -165,7 +197,7 @@ export class LeadService {
     // Filter by search string
     if (query.search) {
       queryBuilder.andWhere(
-        '(lead.fullName ILIKE :search OR lead.primaryPhone ILIKE :search OR lead.primaryEmail ILIKE :search OR lead.leadCode ILIKE :search)',
+        '(lead.fullName ILIKE :search OR lead.primaryPhone ILIKE :search OR lead.primaryEmail ILIKE :search OR lead.leadCode ILIKE :search OR lead.interestedPropertyType ILIKE :search OR lead.city ILIKE :search)',
         { search: `%${query.search}%` }
       );
     }
@@ -183,6 +215,14 @@ export class LeadService {
     // Filter by agent
     if (query.agentId) {
       queryBuilder.andWhere('lead.assignedSalesAgent = :agentId', { agentId: query.agentId });
+    }
+
+    // Filter by project
+    if (query.project) {
+      queryBuilder.andWhere(
+        '(lead.interestedPropertyType ILIKE :project OR lead.city ILIKE :project OR lead.remarks ILIKE :project)',
+        { project: `%${query.project}%` }
+      );
     }
 
     // Filter by budget
@@ -320,6 +360,13 @@ export class LeadService {
     act.subject = 'File Attached';
     act.description = `Attached file: ${file.originalname}`;
     await this.leadActivityRepo.save(act);
+
+    // 4. Automatically synchronize document to main Customer Document repository
+    try {
+      await this.documentService.uploadDocument(leadId, file, { category: 'ID', accessRole: 'Sales' });
+    } catch (err) {
+      console.error('[DOCUMENT SYNC ERROR] Failed to sync attachment to main document module:', err);
+    }
 
     return savedAttach;
   }
@@ -557,6 +604,61 @@ export class LeadService {
     return csvContent;
   }
 
+  async exportExcel(query: any): Promise<Buffer> {
+    const page = 1;
+    const limit = 10000;
+    const { data: leads } = await this.findAll({ ...query, page, limit });
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Leads Export');
+
+    worksheet.columns = [
+      { header: 'Lead Code', key: 'leadCode', width: 18 },
+      { header: 'Full Name', key: 'fullName', width: 25 },
+      { header: 'Primary Phone', key: 'primaryPhone', width: 18 },
+      { header: 'Secondary Phone', key: 'secondaryPhone', width: 18 },
+      { header: 'Primary Email', key: 'primaryEmail', width: 25 },
+      { header: 'City', key: 'city', width: 15 },
+      { header: 'Country', key: 'country', width: 15 },
+      { header: 'Interested Project', key: 'interestedPropertyType', width: 25 },
+      { header: 'Budget Min', key: 'budgetMin', width: 15 },
+      { header: 'Budget Max', key: 'budgetMax', width: 15 },
+      { header: 'Lead Source', key: 'leadSource', width: 18 },
+      { header: 'Lead Status', key: 'leadStatus', width: 15 },
+      { header: 'Assigned Sales Agent', key: 'assignedAgent', width: 22 },
+      { header: 'Created Date', key: 'createdAt', width: 20 },
+    ];
+
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: '0F1B29' },
+    };
+
+    for (const lead of leads) {
+      worksheet.addRow({
+        leadCode: lead.leadCode || '',
+        fullName: lead.fullName || '',
+        primaryPhone: lead.primaryPhone || '',
+        secondaryPhone: lead.secondaryPhone || '',
+        primaryEmail: lead.primaryEmail || '',
+        city: lead.city || '',
+        country: lead.country || '',
+        interestedPropertyType: lead.interestedPropertyType || '',
+        budgetMin: lead.budgetMin ? Number(lead.budgetMin) : '',
+        budgetMax: lead.budgetMax ? Number(lead.budgetMax) : '',
+        leadSource: lead.leadSource?.sourceName || '',
+        leadStatus: lead.leadStatus?.statusName || '',
+        assignedAgent: lead.assignedSalesAgent?.fullName || 'Unassigned',
+        createdAt: lead.createdAt ? new Date(lead.createdAt).toISOString().slice(0, 10) : '',
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
   async getStats(): Promise<any> {
     const totalLeads = await this.leadRepo.count({ where: { isDeleted: false } });
     const duplicateLeads = await this.leadRepo.count({ where: { isDeleted: false, isDuplicate: true } });
@@ -609,7 +711,7 @@ export class LeadService {
       .andWhere('opp.isWon = :isWon', { isWon: false })
       .andWhere('opp.isLost = :isLost', { isLost: false })
       .getRawOne();
-    
+
     const pipelineValue = parseFloat(pipelineResult?.sum || '0');
 
     return {
@@ -700,6 +802,98 @@ export class LeadService {
 
     const [data, total] = await queryBuilder.getManyAndCount();
     return { data, total };
+  }
+
+  async getCommunicationTimeline(query: any): Promise<{ data: Communication[]; total: number }> {
+    const queryBuilder = this.communicationRepo.createQueryBuilder('comm')
+      .leftJoinAndSelect('comm.lead', 'lead')
+      .leftJoinAndSelect('comm.opportunity', 'opportunity')
+      .leftJoinAndSelect('comm.communicationChannel', 'channel')
+      .orderBy('comm.communicationDatetime', 'DESC')
+      .addOrderBy('comm.createdAt', 'DESC');
+
+    if (query.search) {
+      queryBuilder.andWhere(
+        '(comm.subject ILIKE :search OR comm.messageBody ILIKE :search OR lead.fullName ILIKE :search OR comm.externalReference ILIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    if (query.leadId) {
+      queryBuilder.andWhere('lead.id = :leadId', { leadId: +query.leadId });
+    }
+
+    if (query.channel && query.channel !== 'all') {
+      queryBuilder.andWhere(
+        '(comm.communicationStatus ILIKE :channel OR channel.channelName ILIKE :channel OR comm.subject ILIKE :channel)',
+        { channel: `%${query.channel}%` },
+      );
+    }
+
+    if (query.dateFrom) {
+      queryBuilder.andWhere('comm.communicationDatetime >= :dateFrom', { dateFrom: new Date(query.dateFrom) });
+    }
+
+    if (query.dateTo) {
+      const endOfDay = new Date(query.dateTo);
+      endOfDay.setHours(23, 59, 59, 999);
+      queryBuilder.andWhere('comm.communicationDatetime <= :dateTo', { dateTo: endOfDay });
+    }
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+    return { data, total };
+  }
+
+  async editCommunication(id: number, data: any, userId: number = 1): Promise<Communication> {
+    const comm = await this.communicationRepo.findOne({
+      where: { id },
+      relations: { lead: true, opportunity: true, communicationChannel: true },
+    });
+    if (!comm) {
+      throw new NotFoundException(`Communication record with ID ${id} not found`);
+    }
+
+    const oldValue = {
+      subject: comm.subject,
+      messageBody: comm.messageBody,
+      communicationDirection: comm.communicationDirection,
+      durationSeconds: comm.durationSeconds,
+      externalReference: comm.externalReference,
+      communicationStatus: comm.communicationStatus,
+    };
+
+    if (data.subject !== undefined) comm.subject = data.subject;
+    if (data.messageBody !== undefined) comm.messageBody = data.messageBody;
+    if (data.communicationDirection !== undefined) comm.communicationDirection = data.communicationDirection;
+    if (data.durationSeconds !== undefined) comm.durationSeconds = data.durationSeconds;
+    if (data.externalReference !== undefined) comm.externalReference = data.externalReference;
+    if (data.communicationStatus !== undefined) comm.communicationStatus = data.communicationStatus;
+
+    const updated = await this.communicationRepo.save(comm);
+
+    const audit = new CommunicationAudit();
+    audit.communication = updated;
+    audit.auditAction = 'Edit';
+    audit.oldValue = oldValue;
+    audit.newValue = {
+      subject: updated.subject,
+      messageBody: updated.messageBody,
+      communicationDirection: updated.communicationDirection,
+      durationSeconds: updated.durationSeconds,
+      externalReference: updated.externalReference,
+      communicationStatus: updated.communicationStatus,
+    };
+    audit.changedBy = userId;
+    await this.commAuditRepo.save(audit);
+
+    return updated;
+  }
+
+  async getCommunicationAudits(id: number): Promise<CommunicationAudit[]> {
+    return this.commAuditRepo.find({
+      where: { communication: { id } },
+      order: { changedAt: 'DESC' },
+    });
   }
 }
 

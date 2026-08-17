@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Res, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, Res, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -29,6 +29,7 @@ export class LeadController {
   @ApiQuery({ name: 'statusId', required: false, type: Number, description: 'Filter by lead status ID' })
   @ApiQuery({ name: 'sourceId', required: false, type: Number, description: 'Filter by lead source ID' })
   @ApiQuery({ name: 'agentId', required: false, type: Number, description: 'Filter by assigned agent ID' })
+  @ApiQuery({ name: 'project', required: false, type: String, description: 'Filter by interested project/property' })
   @ApiQuery({ name: 'startDate', required: false, type: String, description: 'Filter by creation start date (YYYY-MM-DD)' })
   @ApiQuery({ name: 'endDate', required: false, type: String, description: 'Filter by creation end date (YYYY-MM-DD)' })
   @ApiResponse({ status: 200, description: 'List of leads matching criteria' })
@@ -43,8 +44,8 @@ export class LeadController {
     return this.leadService.getStats();
   }
 
-  @Get('export')
-  @ApiOperation({ summary: 'Export leads list to CSV format' })
+  @Get('export/csv')
+  @ApiOperation({ summary: 'Export leads list to CSV' })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'statusId', required: false, type: Number })
   @ApiQuery({ name: 'sourceId', required: false, type: Number })
@@ -57,6 +58,16 @@ export class LeadController {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=leads-export.csv');
     res.status(200).send(csvContent);
+  }
+
+  @Get('export/excel')
+  @ApiOperation({ summary: 'Export leads list to Excel (.xlsx)' })
+  @ApiResponse({ status: 200, description: 'Excel .xlsx file containing filtered leads metadata' })
+  async exportExcel(@Query() query: any, @Res() res: Response) {
+    const buffer = await this.leadService.exportExcel(query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=leads-export.xlsx');
+    res.status(200).send(buffer);
   }
 
   @Get('notes/all')
@@ -197,7 +208,23 @@ export class LeadController {
         const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
         cb(null, `${randomName}${extname(file.originalname)}`);
       }
-    })
+    }),
+    fileFilter: (req, file, cb) => {
+      const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.docx'];
+      const allowedMimes = [
+        'application/pdf',
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword'
+      ];
+      const ext = extname(file.originalname).toLowerCase();
+      if (!allowedExts.includes(ext) || (file.mimetype && !allowedMimes.includes(file.mimetype.toLowerCase()))) {
+        return cb(new BadRequestException('Unsupported file type. Only PDF, JPG, PNG, and DOCX files are accepted.'), false);
+      }
+      cb(null, true);
+    }
   }))
   @ApiResponse({ status: 201, description: 'File successfully uploaded and attached to lead' })
   @ApiResponse({ status: 404, description: 'Lead not found' })
@@ -229,6 +256,24 @@ export class LeadController {
   @ApiResponse({ status: 404, description: 'Lead not found' })
   async addNote(@Param('id') id: string, @Body('note') noteContent: string) {
     return this.leadService.addNote(+id, noteContent);
+  }
+
+  @Get('communications/timeline')
+  @ApiOperation({ summary: 'Get unified communication timeline with filters' })
+  async getCommunicationTimeline(@Query() query: any) {
+    return this.leadService.getCommunicationTimeline(query);
+  }
+
+  @Put('communications/:id')
+  @ApiOperation({ summary: 'Edit a communication record and log audit history' })
+  async editCommunication(@Param('id') id: string, @Body() body: any) {
+    return this.leadService.editCommunication(+id, body, 1);
+  }
+
+  @Get('communications/:id/audits')
+  @ApiOperation({ summary: 'Get audit change logs for a communication record' })
+  async getCommunicationAudits(@Param('id') id: string) {
+    return this.leadService.getCommunicationAudits(+id);
   }
 }
 

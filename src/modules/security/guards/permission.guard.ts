@@ -1,7 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { verifyToken, hashToken } from '../utils/security.crypto';
-import { SEEDED_PERMISSIONS } from '../../../../seeded-permissions';
+import { SEEDED_PERMISSIONS } from '../seeded-permissions';
 
 @Injectable()
 export class PermissionGuard implements CanActivate {

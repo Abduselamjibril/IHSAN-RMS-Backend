@@ -49,11 +49,18 @@ export class LeadSourceController {
   @ApiResponse({ status: 201, description: 'Lead source successfully created' })
   @ApiResponse({ status: 400, description: 'Invalid payload' })
   async create(@Body() body: Partial<LeadSource>) {
-    if (!body.sourceName) {
+    if (!body.sourceName || !body.sourceName.trim()) {
       throw new BadRequestException('Source name is required');
     }
+    const existing = await this.leadSourceRepo.createQueryBuilder('ls')
+      .where('LOWER(ls.sourceName) = LOWER(:name)', { name: body.sourceName.trim() })
+      .getOne();
+    if (existing) {
+      throw new BadRequestException(`Lead source with name '${body.sourceName.trim()}' already exists.`);
+    }
+
     const source = new LeadSource();
-    source.sourceName = body.sourceName;
+    source.sourceName = body.sourceName.trim();
     source.sourceType = body.sourceType ?? '';
     source.description = body.description ?? '';
     source.isActive = body.isActive !== undefined ? body.isActive : true;

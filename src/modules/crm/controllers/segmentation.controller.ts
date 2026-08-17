@@ -86,11 +86,36 @@ export class SegmentationController {
     }
   }
 
+  @Get(':id/report')
+  @ApiParam({ name: 'id', description: 'Segment ID' })
+  @ApiOperation({ summary: 'Get segment report metrics (conversion rate %, revenue contribution $)' })
+  async getReport(@Param('id', ParseIntPipe) id: number) {
+    return this.segmentationService.getSegmentReport(id);
+  }
+
   @Post(':id/recalculate')
   @ApiParam({ name: 'id', description: 'Segment ID' })
   @ApiOperation({ summary: 'Recalculate dynamic segment members' })
   async recalculate(@Param('id', ParseIntPipe) id: number) {
     return this.segmentationService.recalculateSegment(id);
+  }
+
+  @Post('leads/:leadId/tags')
+  @ApiOperation({ summary: 'Assign tags to a customer/lead' })
+  async assignTags(
+    @Param('leadId', ParseIntPipe) leadId: number,
+    @Body('tagIds') tagIds: number[],
+  ) {
+    return this.segmentationService.assignTagsToLead(leadId, tagIds || []);
+  }
+
+  @Delete('leads/:leadId/tags/:tagId')
+  @ApiOperation({ summary: 'Remove a tag from a customer/lead' })
+  async removeTag(
+    @Param('leadId', ParseIntPipe) leadId: number,
+    @Param('tagId', ParseIntPipe) tagId: number,
+  ) {
+    return this.segmentationService.removeTagFromLead(leadId, tagId);
   }
 
   @Delete(':id')

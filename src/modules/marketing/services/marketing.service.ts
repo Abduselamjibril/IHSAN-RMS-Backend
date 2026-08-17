@@ -78,18 +78,70 @@ export class MarketingService {
     private readonly bookingRepo: Repository<SalesBooking>,
   ) {}
 
+  // --- Auto Campaign Status Transition & Validation Helpers ---
+  async checkAndUpdateCampaignStatuses(): Promise<void> {
+    const now = new Date();
+    const activeCampaigns = await this.campaignRepo.find({
+      where: { campaignStatus: 'ACTIVE' },
+    });
+
+    for (const campaign of activeCampaigns) {
+      if (campaign.endDate && new Date(campaign.endDate) < now) {
+        campaign.campaignStatus = 'COMPLETED';
+        await this.campaignRepo.save(campaign);
+
+        // Record status change in notification / audit log without duplicate entries
+        const existingLog = await this.notificationLogRepo.findOne({
+          where: {
+            recipient: `Campaign-${campaign.id}`,
+            notificationType: 'System Auto Transition',
+          },
+        });
+
+        if (!existingLog) {
+          const log = new MarketingNotificationLog();
+          log.campaign = campaign;
+          log.recipient = `Campaign-${campaign.id}`;
+          log.notificationType = 'System Auto Transition';
+          log.messageContent = `Campaign "${campaign.campaignName}" (${campaign.campaignCode}) automatically transitioned from ACTIVE to COMPLETED because end date (${campaign.endDate}) has passed.`;
+          log.deliveryStatus = 'SENT';
+          log.sentDate = new Date();
+          await this.notificationLogRepo.save(log);
+        }
+      }
+    }
+  }
+
+  private validateActivationStartDate(startDateInput: Date | string): void {
+    const startDate = new Date(startDateInput);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Start of today
+
+    if (startDate < today) {
+      throw new (require('@nestjs/common').BadRequestException)(
+        'Campaign start date has passed. Please update the start date before activating the campaign.'
+      );
+    }
+  }
+
   // --- Campaign Operations ---
   async getCampaigns(): Promise<MarketingCampaign[]> {
+    await this.checkAndUpdateCampaignStatuses();
     return this.campaignRepo.find({ order: { createdDate: 'DESC' } });
   }
 
   async getCampaignById(id: number): Promise<MarketingCampaign> {
+    await this.checkAndUpdateCampaignStatuses();
     const campaign = await this.campaignRepo.findOne({ where: { id } });
     if (!campaign) throw new NotFoundException(`Campaign with ID ${id} not found`);
     return campaign;
   }
 
   async createCampaign(dto: CreateCampaignDto): Promise<MarketingCampaign> {
+    if (dto.campaignStatus === 'ACTIVE') {
+      this.validateActivationStartDate(dto.startDate);
+    }
+
     const campaign = new MarketingCampaign();
     campaign.campaignCode = dto.campaignCode;
     campaign.campaignName = dto.campaignName;
@@ -116,6 +168,12 @@ export class MarketingService {
 
   async updateCampaign(id: number, dto: UpdateCampaignDto): Promise<MarketingCampaign> {
     const campaign = await this.getCampaignById(id);
+
+    // If activating the campaign, validate start date
+    if (dto.campaignStatus === 'ACTIVE' || (dto.campaignStatus === undefined && campaign.campaignStatus === 'ACTIVE' && dto.startDate !== undefined)) {
+      const targetStartDate = dto.startDate ? new Date(dto.startDate) : campaign.startDate;
+      this.validateActivationStartDate(targetStartDate);
+    }
 
     if (dto.campaignCode !== undefined) campaign.campaignCode = dto.campaignCode;
     if (dto.campaignName !== undefined) campaign.campaignName = dto.campaignName;
@@ -203,14 +261,27 @@ export class MarketingService {
     return this.expenseRepo.find({ where: { advertisement: { id: adId } }, order: { expenseDate: 'DESC' } });
   }
 
-  async recordAdExpense(adId: number, dto: RecordExpenseDto): Promise<AdvertisementExpense> {
+  async recordAdExpense(adId: number, dto: RecordExpenseDto): Promise<any> {
     const ad = await this.getAdvertisementById(adId);
+    const campaignId = ad.campaign.id;
+    const budget = await this.budgetRepo.findOne({ where: { campaign: { id: campaignId } } });
+
+    const newExpenseAmount = Number(dto.expenseAmount) || 0;
+    let overspendWarning: string | null = null;
+    let remainingBefore: number = 0;
+
+    if (budget) {
+      remainingBefore = Number(budget.remainingBudget);
+      if (newExpenseAmount > remainingBefore) {
+        overspendWarning = `⚠️ This expense exceeds the campaign budget. Remaining budget: ${remainingBefore.toLocaleString()} ETB.`;
+      }
+    }
 
     const expense = new AdvertisementExpense();
     expense.advertisement = ad;
     expense.expenseDate = new Date(dto.expenseDate);
     expense.expenseType = dto.expenseType || 'Media Cost';
-    expense.expenseAmount = dto.expenseAmount || 0;
+    expense.expenseAmount = newExpenseAmount;
     expense.vendorName = dto.vendorName || '';
     expense.paymentReference = dto.paymentReference || '';
     expense.remarks = dto.remarks || '';
@@ -218,15 +289,17 @@ export class MarketingService {
     const savedExpense = await this.expenseRepo.save(expense);
 
     // Sync campaign budget utilization
-    const campaignId = ad.campaign.id;
-    const budget = await this.budgetRepo.findOne({ where: { campaign: { id: campaignId } } });
     if (budget) {
-      budget.utilizedBudget = Number(budget.utilizedBudget) + Number(savedExpense.expenseAmount);
+      budget.utilizedBudget = Number(budget.utilizedBudget) + newExpenseAmount;
       budget.remainingBudget = budget.allocatedBudget - budget.utilizedBudget;
       await this.budgetRepo.save(budget);
     }
 
-    return savedExpense;
+    return {
+      ...savedExpense,
+      warning: overspendWarning,
+      remainingBudget: budget ? budget.remainingBudget : 0,
+    };
   }
 
   async getAdPerformances(adId: number): Promise<AdvertisementPerformance[]> {
@@ -297,76 +370,195 @@ export class MarketingService {
   }
 
   // --- Reporting & Dashboard View Queries ---
-  async getCampaignPerformanceReport(): Promise<CampaignPerformanceView[]> {
-    return this.performanceViewRepo.find();
+  // --- Reporting & Dashboard View Queries ---
+  async getCampaignPerformanceReport(startDate?: string, endDate?: string, campaignId?: number): Promise<any[]> {
+    await this.checkAndUpdateCampaignStatuses();
+    const qb = this.campaignRepo.createQueryBuilder('c');
+
+    if (campaignId) {
+      qb.andWhere('c.id = :campaignId', { campaignId: Number(campaignId) });
+    }
+    if (startDate) {
+      qb.andWhere('c.startDate >= :startDate', { startDate });
+    }
+    if (endDate) {
+      qb.andWhere('c.endDate <= :endDate', { endDate });
+    }
+
+    const campaigns = await qb.getMany();
+    const result: any[] = [];
+
+    for (const c of campaigns) {
+      const budget = await this.budgetRepo.findOne({ where: { campaign: { id: c.id } } });
+      const budgetAmount = Number(c.budgetAmount) || 0;
+      const utilizedBudget = budget ? Number(budget.utilizedBudget) : 0;
+      const remainingBudget = budgetAmount - utilizedBudget;
+
+      const leadsGenerated = await this.marketingLeadRepo.count({
+        where: { campaign: { id: c.id } },
+      });
+
+      const salesGenerated = await this.marketingLeadRepo.createQueryBuilder('ml')
+        .innerJoin('crm_customer', 'cust', 'cust.lead_id = ml.lead_id')
+        .where('ml.campaign_id = :cId', { cId: c.id })
+        .getCount();
+
+      const bookingsRaw = await this.bookingRepo.createQueryBuilder('s')
+        .innerJoin('crm_customer', 'cust', 's.customer_id = cust.id')
+        .innerJoin('rems_marketing_lead', 'ml', 'cust.lead_id = ml.lead_id')
+        .where('ml.campaign_id = :cId', { cId: c.id })
+        .select('SUM(s.booking_amount)', 'revenue')
+        .getRawOne();
+
+      const revenueGenerated = bookingsRaw?.revenue ? Number(bookingsRaw.revenue) : 0;
+      const conversionRate = leadsGenerated > 0 ? (salesGenerated / leadsGenerated) * 100 : 0;
+      const roiPercentage = utilizedBudget > 0 ? ((revenueGenerated - utilizedBudget) / utilizedBudget) * 100 : 0;
+
+      result.push({
+        id: c.id,
+        campaignId: c.id,
+        campaignCode: c.campaignCode,
+        campaignName: c.campaignName,
+        campaignType: c.campaignType,
+        campaignStatus: c.campaignStatus,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        budgetAmount,
+        utilizedBudget,
+        remainingBudget,
+        leadsGenerated,
+        salesGenerated,
+        revenueGenerated,
+        conversionRate: Math.round(conversionRate * 100) / 100,
+        roiPercentage: Math.round(roiPercentage * 100) / 100,
+        roi: Math.round(roiPercentage * 100) / 100,
+      });
+    }
+
+    return result;
   }
 
-  async getLeadSourceAnalysisReport(): Promise<LeadSourceAnalysisView[]> {
-    return this.leadSourceAnalysisViewRepo.find();
+  async getLeadSourceAnalysisReport(startDate?: string, endDate?: string): Promise<any[]> {
+    const allSources = await this.leadSourceRepo.find();
+    const result: any[] = [];
+
+    for (const src of allSources) {
+      const qbLeads = this.leadRepo.createQueryBuilder('l')
+        .where('l.lead_source_id = :srcId', { srcId: src.id });
+
+      if (startDate) qbLeads.andWhere('l.created_at >= :startDate', { startDate });
+      if (endDate) qbLeads.andWhere('l.created_at <= :endDate', { endDate });
+
+      const totalLeads = await qbLeads.getCount();
+
+      const qbConverted = this.leadRepo.createQueryBuilder('l')
+        .innerJoin('crm_customer', 'c', 'c.lead_id = l.id')
+        .where('l.lead_source_id = :srcId', { srcId: src.id });
+
+      if (startDate) qbConverted.andWhere('l.created_at >= :startDate', { startDate });
+      if (endDate) qbConverted.andWhere('l.created_at <= :endDate', { endDate });
+
+      const convertedCount = await qbConverted.getCount();
+
+      const revenueRaw = await this.bookingRepo.createQueryBuilder('b')
+        .innerJoin('crm_customer', 'c', 'b.customer_id = c.id')
+        .innerJoin('crm_lead', 'l', 'c.lead_id = l.id')
+        .where('l.lead_source_id = :srcId', { srcId: src.id })
+        .select('SUM(b.booking_amount)', 'revenue')
+        .getRawOne();
+
+      const revenueContribution = revenueRaw?.revenue ? Number(revenueRaw.revenue) : 0;
+
+      const expensesRaw = await this.expenseRepo.createQueryBuilder('e')
+        .innerJoin('e.advertisement', 'ad')
+        .where('UPPER(ad.advertisement_channel) = UPPER(:channel)', { channel: src.sourceName })
+        .select('SUM(e.expense_amount)', 'expense')
+        .getRawOne();
+
+      const totalExpense = expensesRaw?.expense ? Number(expensesRaw.expense) : 0;
+      const conversionRate = totalLeads > 0 ? (convertedCount / totalLeads) * 100 : 0;
+      const costPerLead = totalLeads > 0 ? totalExpense / totalLeads : 0;
+
+      result.push({
+        id: src.id,
+        sourceId: src.id,
+        sourceName: src.sourceName,
+        channelType: src.sourceType || 'DIRECT',
+        totalLeads,
+        leads: totalLeads,
+        convertedLeads: convertedCount,
+        converted: convertedCount,
+        conversionRate: Math.round(conversionRate * 100) / 100,
+        totalExpense,
+        costPerLead: Math.round(costPerLead * 100) / 100,
+        cpl: Math.round(costPerLead * 100) / 100,
+        revenueContribution,
+      });
+    }
+
+    result.sort((a, b) => b.revenueContribution - a.revenueContribution || b.totalLeads - a.totalLeads);
+    result.forEach((item, index) => {
+      item.rank = index + 1;
+    });
+
+    return result;
   }
 
-  async getDashboardKpis() {
-    // 1. Total Leads
-    const totalLeads = await this.marketingLeadRepo.count();
+  async getDashboardKpis(startDate?: string, endDate?: string) {
+    const qbLeads = this.leadRepo.createQueryBuilder('l');
+    if (startDate) qbLeads.andWhere('l.created_at >= :startDate', { startDate });
+    if (endDate) qbLeads.andWhere('l.created_at <= :endDate', { endDate });
 
-    // 2. Qualified Leads (Probability >= 70)
-    const qualifiedLeads = await this.marketingLeadRepo.createQueryBuilder('ml')
-      .where('ml.conversion_probability >= :prob', { prob: 70 })
+    const totalLeads = await qbLeads.getCount();
+
+    const qualifiedLeads = await this.leadRepo.createQueryBuilder('l')
+      .where('l.lead_status_id IN (2, 3, 4)')
       .getCount();
 
-    // 3. Converted Leads (Leads converted to Customers who have an approved booking)
-    const convertedLeads = await this.marketingLeadRepo.createQueryBuilder('ml')
-      .innerJoin('crm_customer', 'cust', 'cust.lead_id = ml.lead_id')
-      .innerJoin('sales_booking', 's', 's.customer_id = cust.id')
+    const convertedLeads = await this.leadRepo.createQueryBuilder('l')
+      .innerJoin('crm_customer', 'c', 'c.lead_id = l.id')
       .getCount();
 
-    // 4. Conversion Rate
     const conversionRate = totalLeads > 0 ? (convertedLeads / totalLeads) * 100 : 0;
 
-    // 5. Marketing Cost (Sum of all advertisement expenses)
     const expenses = await this.expenseRepo.find();
     const marketingCost = expenses.reduce((sum, exp) => sum + Number(exp.expenseAmount), 0);
 
-    // 6. Revenue Generated (Sum of revenue from converted bookings)
     const bookings = await this.bookingRepo.createQueryBuilder('s')
-      .innerJoin('crm_customer', 'cust', 's.customer_id = cust.id')
-      .innerJoin('rems_marketing_lead', 'ml', 'cust.lead_id = ml.lead_id')
       .select('SUM(s.booking_amount)', 'revenue')
       .getRawOne();
     
     const revenueGenerated = bookings?.revenue ? Number(bookings.revenue) : 0;
-
-    // 7. ROI
     const roi = marketingCost > 0 ? ((revenueGenerated - marketingCost) / marketingCost) * 100 : 0;
 
     return {
       totalLeads,
       qualifiedLeads,
       convertedLeads,
-      conversionRate,
+      conversionRate: Math.round(conversionRate * 100) / 100,
       marketingCost,
       revenueGenerated,
-      roi,
+      roi: Math.round(roi * 100) / 100,
     };
   }
 
-  async getDashboardCharts() {
-    // Lead Source Trend
-    const sourceTrend = await this.marketingLeadRepo.createQueryBuilder('ml')
-      .leftJoin('ml.leadSource', 'ls')
-      .select('COALESCE(ls.source_name, \'Unknown\')', 'source')
-      .addSelect('COUNT(ml.id)', 'count')
+  async getDashboardCharts(startDate?: string, endDate?: string) {
+    const sourceTrend = await this.leadRepo.createQueryBuilder('l')
+      .leftJoin('l.leadSource', 'ls')
+      .select('COALESCE(ls.source_name, \'Direct / Other\')', 'source')
+      .addSelect('TO_CHAR(l.created_at, \'YYYY-MM\')', 'month')
+      .addSelect('COUNT(l.id)', 'count')
       .groupBy('ls.source_name')
+      .addGroupBy('TO_CHAR(l.created_at, \'YYYY-MM\')')
+      .orderBy('month', 'ASC')
       .getRawMany();
 
-    // Campaign Performance
-    const campaigns = await this.performanceViewRepo.find();
+    const campaigns = await this.getCampaignPerformanceReport(startDate, endDate);
 
-    // Monthly Lead Growth (grouped by month of creation)
-    const monthlyLeads = await this.marketingLeadRepo.createQueryBuilder('ml')
-      .select('TO_CHAR(ml.created_date, \'YYYY-MM\')', 'month')
-      .addSelect('COUNT(ml.id)', 'count')
-      .groupBy('TO_CHAR(ml.created_date, \'YYYY-MM\')')
+    const monthlyLeads = await this.leadRepo.createQueryBuilder('l')
+      .select('TO_CHAR(l.created_at, \'YYYY-MM\')', 'month')
+      .addSelect('COUNT(l.id)', 'count')
+      .groupBy('TO_CHAR(l.created_at, \'YYYY-MM\')')
       .orderBy('month', 'ASC')
       .getRawMany();
 

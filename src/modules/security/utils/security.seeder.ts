@@ -8,7 +8,7 @@ import { PermissionGroup } from '../entities/permission-group.entity';
 import { Permission } from '../entities/permission.entity';
 import { RolePermission } from '../entities/role-permission.entity';
 import { hashPassword } from './security.crypto';
-import { SEEDED_PERMISSIONS } from '../../../../seeded-permissions';
+import { SEEDED_PERMISSIONS } from '../seeded-permissions';
 
 @Injectable()
 export class SecuritySeeder {

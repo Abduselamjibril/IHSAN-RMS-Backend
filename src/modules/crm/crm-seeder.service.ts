@@ -53,22 +53,30 @@ export class CrmSeederService implements OnModuleInit {
   }
 
   private async seedLeadSources() {
-    const count = await this.leadSourceRepo.count();
-    if (count === 0) {
-      this.logger.log('Seeding CRM Lead Sources...');
-      const sources = [
-        { sourceName: 'Website', sourceType: 'Digital', description: 'Inquiries via company website portal' },
-        { sourceName: 'Facebook', sourceType: 'Social Media', description: 'Leads from Facebook campaigns' },
-        { sourceName: 'Instagram', sourceType: 'Social Media', description: 'Leads from Instagram campaigns' },
-        { sourceName: 'Google Ads', sourceType: 'Digital', description: 'Paid Google search traffic' },
-        { sourceName: 'Referral', sourceType: 'Offline', description: 'Existing customer recommendations' },
-        { sourceName: 'Walk-in', sourceType: 'Offline', description: 'Unannounced visitors to head office' },
-        { sourceName: 'Broker', sourceType: 'Agent', description: 'Brought in by third-party commission agents' },
-        { sourceName: 'Billboard', sourceType: 'Offline', description: 'Outdoor physical advertisement boards' },
-        { sourceName: 'Email Campaign', sourceType: 'Digital', description: 'Monthly newsletters and email blasts' },
-      ];
-      await this.leadSourceRepo.save(sources);
-      this.logger.log(`Seeded ${sources.length} Lead Sources.`);
+    const defaultSources = [
+      { sourceName: 'Facebook', sourceType: 'Social Media', description: 'Leads from Facebook campaigns' },
+      { sourceName: 'Telegram', sourceType: 'Social Media', description: 'Inquiries received via Telegram channel/bot' },
+      { sourceName: 'Referral', sourceType: 'Offline', description: 'Existing customer recommendations' },
+      { sourceName: 'Website', sourceType: 'Digital', description: 'Inquiries via company website portal' },
+      { sourceName: 'Walk-in', sourceType: 'Offline', description: 'Unannounced visitors to office' },
+      { sourceName: 'Phone Inquiry', sourceType: 'Phone', description: 'Direct incoming phone call inquiries' },
+      { sourceName: 'Campaign/Event', sourceType: 'Marketing Event', description: 'Leads from property expos & promotional events' },
+      { sourceName: 'Instagram', sourceType: 'Social Media', description: 'Leads from Instagram campaigns' },
+      { sourceName: 'Google Ads', sourceType: 'Digital', description: 'Paid Google search traffic' },
+      { sourceName: 'Broker', sourceType: 'Agent', description: 'Brought in by third-party commission agents' },
+      { sourceName: 'Billboard', sourceType: 'Offline', description: 'Outdoor physical advertisement boards' },
+      { sourceName: 'Email Campaign', sourceType: 'Digital', description: 'Monthly newsletters and email blasts' },
+    ];
+
+    for (const src of defaultSources) {
+      const existing = await this.leadSourceRepo.findOne({
+        where: { sourceName: src.sourceName }
+      });
+      if (!existing) {
+        const newSource = this.leadSourceRepo.create(src);
+        await this.leadSourceRepo.save(newSource);
+        this.logger.log(`Seeded Lead Source: ${src.sourceName}`);
+      }
     }
   }
 
@@ -90,19 +98,24 @@ export class CrmSeederService implements OnModuleInit {
   }
 
   private async seedOpportunityStages() {
-    const count = await this.opportunityStageRepo.count();
-    if (count === 0) {
-      this.logger.log('Seeding CRM Opportunity Stages...');
-      const stages = [
-        { stageName: 'Qualification', sortOrder: 1, probabilityPercent: 10.0, colorCode: '#3b82f6', isClosed: false },
-        { stageName: 'Needs Analysis', sortOrder: 2, probabilityPercent: 20.0, colorCode: '#6366f1', isClosed: false },
-        { stageName: 'Proposal/Price Quote', sortOrder: 3, probabilityPercent: 50.0, colorCode: '#a855f7', isClosed: false },
-        { stageName: 'Negotiation', sortOrder: 4, probabilityPercent: 80.0, colorCode: '#eab308', isClosed: false },
-        { stageName: 'Closed Won', sortOrder: 5, probabilityPercent: 100.0, colorCode: '#10b981', isClosed: true },
-        { stageName: 'Closed Lost', sortOrder: 6, probabilityPercent: 0.0, colorCode: '#ef4444', isClosed: true },
-      ];
-      await this.opportunityStageRepo.save(stages);
-      this.logger.log(`Seeded ${stages.length} Opportunity Stages.`);
+    const requiredStages = [
+      { stageName: 'New Opportunity', sortOrder: 1, probabilityPercent: 10.0, colorCode: '#3b82f6', isClosed: false },
+      { stageName: 'Qualified', sortOrder: 2, probabilityPercent: 25.0, colorCode: '#6366f1', isClosed: false },
+      { stageName: 'Property Viewing', sortOrder: 3, probabilityPercent: 40.0, colorCode: '#8b5cf6', isClosed: false },
+      { stageName: 'Negotiation', sortOrder: 4, probabilityPercent: 60.0, colorCode: '#eab308', isClosed: false },
+      { stageName: 'Reservation', sortOrder: 5, probabilityPercent: 75.0, colorCode: '#ec4899', isClosed: false },
+      { stageName: 'Contract Processing', sortOrder: 6, probabilityPercent: 90.0, colorCode: '#14b8a6', isClosed: false },
+      { stageName: 'Won', sortOrder: 7, probabilityPercent: 100.0, colorCode: '#10b981', isClosed: true },
+      { stageName: 'Lost', sortOrder: 8, probabilityPercent: 0.0, colorCode: '#ef4444', isClosed: true },
+    ];
+
+    for (const stageData of requiredStages) {
+      const existing = await this.opportunityStageRepo.findOne({
+        where: [{ stageName: stageData.stageName }, { sortOrder: stageData.sortOrder }],
+      });
+      if (!existing) {
+        await this.opportunityStageRepo.save(stageData);
+      }
     }
   }
 

@@ -50,7 +50,7 @@ async function bootstrap() {
   app.use('/api', createRateLimiter(300, 15 * 60 * 1000));
 
   // Ensure uploads directory exists
-  const uploadsDir = join(__dirname, '..', 'uploads');
+  const uploadsDir = join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
@@ -78,6 +78,8 @@ async function bootstrap() {
       const authHeader = req.headers['authorization'];
       if (authHeader && authHeader.startsWith('Bearer ')) {
         token = authHeader.replace('Bearer ', '');
+      } else if (req.query && req.query.token) {
+        token = req.query.token as string;
       } else if (req.headers.cookie) {
         const cookies = req.headers.cookie.split(';').reduce((acc: any, c: string) => {
           const parts = c.trim().split('=');
@@ -117,10 +119,11 @@ async function bootstrap() {
   });
 
   app.use('/uploads', express.static(uploadsDir, {
-    setHeaders: (res) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+    setHeaders: (res: any) => {
+      res.setHeader('Access-Control-Allow-Origin', 'http://localhost:4200');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     }
   }));
 

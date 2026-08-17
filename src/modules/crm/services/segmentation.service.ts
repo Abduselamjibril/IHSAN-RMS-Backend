@@ -132,12 +132,16 @@ export class SegmentationService {
       let dbField = '';
 
       // Map dynamic fields
-      if (rule.fieldName === 'statusId') {
+      if (rule.fieldName === 'statusId' || rule.fieldName === 'status') {
         dbField = 'leadStatus.id';
+      } else if (rule.fieldName === 'statusName') {
+        dbField = 'leadStatus.statusName';
       } else if (rule.fieldName === 'sourceId') {
         dbField = 'leadSource.id';
       } else if (rule.fieldName === 'agentId') {
         dbField = 'assignedSalesAgent.id';
+      } else if (rule.fieldName === 'interestedPropertyType' || rule.fieldName === 'interestedIn') {
+        dbField = 'lead.interestedPropertyType';
       } else {
         dbField = `lead.${rule.fieldName}`;
       }
@@ -171,5 +175,67 @@ export class SegmentationService {
 
     // Refresh return
     return this.findOneSegment(saved.id);
+  }
+
+  // ================= Segment Metrics Report =================
+  async getSegmentReport(id: number): Promise<any> {
+    const segment = await this.segmentRepo.findOne({
+      where: { id },
+      relations: { members: { leadStatus: true }, rules: true },
+    });
+    if (!segment) {
+      throw new NotFoundException(`Customer Segment with ID ${id} not found`);
+    }
+
+    const members = segment.members || [];
+    const totalMembers = members.length;
+    const convertedMembers = members.filter(
+      m => m.leadStatus?.isConverted || m.leadStatus?.statusName === 'Converted'
+    ).length;
+    const conversionRatePercent = totalMembers > 0 ? Number(((convertedMembers / totalMembers) * 100).toFixed(1)) : 0;
+
+    let revenueContributionUSD = 0;
+    if (totalMembers > 0) {
+      const memberIds = members.map(m => m.id);
+      const revResult = await this.leadRepo.createQueryBuilder('lead')
+        .innerJoin('crm_opportunity', 'opp', 'opp.lead_id = lead.id')
+        .select('SUM(opp.estimated_value)', 'total')
+        .where('lead.id IN (:...memberIds)', { memberIds })
+        .andWhere('opp.is_won = true')
+        .getRawOne();
+      revenueContributionUSD = parseFloat(revResult?.total || '0');
+    }
+
+    return {
+      segmentId: segment.id,
+      segmentName: segment.segmentName,
+      segmentSize: totalMembers,
+      convertedMembers,
+      conversionRatePercent,
+      revenueContributionUSD,
+      rules: segment.rules,
+    };
+  }
+
+  // ================= Tag Assignment =================
+  async assignTagsToLead(leadId: number, tagIds: number[]): Promise<Lead> {
+    const lead = await this.leadRepo.findOne({ where: { id: leadId }, relations: { tags: true } });
+    if (!lead) {
+      throw new NotFoundException(`Lead with ID ${leadId} not found`);
+    }
+
+    const tags = await this.tagRepo.find({ where: tagIds.map(id => ({ id })) });
+    lead.tags = tags;
+    return this.leadRepo.save(lead);
+  }
+
+  async removeTagFromLead(leadId: number, tagId: number): Promise<Lead> {
+    const lead = await this.leadRepo.findOne({ where: { id: leadId }, relations: { tags: true } });
+    if (!lead) {
+      throw new NotFoundException(`Lead with ID ${leadId} not found`);
+    }
+
+    lead.tags = (lead.tags || []).filter(t => t.id !== tagId);
+    return this.leadRepo.save(lead);
   }
 }

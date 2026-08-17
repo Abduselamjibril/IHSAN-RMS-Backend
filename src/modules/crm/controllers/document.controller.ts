@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Param, Body, Query, UseInterceptors, UploadedFile, ParseIntPipe, BadRequestException } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Controller, Get, Post, Param, Body, Query, UseInterceptors, UploadedFile, UploadedFiles, ParseIntPipe, BadRequestException } from '@nestjs/common';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { DocumentService } from '../services/document.service';
@@ -114,6 +114,65 @@ export class DocumentController {
   ) {
     if (!file) throw new BadRequestException('File is required.');
     return this.documentService.addVersion(id, file);
+  }
+
+  @Post(':leadId/multiple')
+  @ApiParam({ name: 'leadId', description: 'Lead ID' })
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload multiple customer documents simultaneously' })
+  @UseInterceptors(FilesInterceptor('files', 10, {
+    storage: diskStorage({
+      destination: './uploads',
+      filename: (req, file, cb) => {
+        const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
+        cb(null, `${randomName}${extname(file.originalname)}`);
+      }
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.docx'];
+      const allowedMimes = [
+        'application/pdf',
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword'
+      ];
+      const ext = extname(file.originalname).toLowerCase();
+      if (!allowedExts.includes(ext) || (file.mimetype && !allowedMimes.includes(file.mimetype.toLowerCase()))) {
+        return cb(new BadRequestException('Unsupported file format. Only PDF, JPG, PNG, and DOCX files are accepted.'), false);
+      }
+      cb(null, true);
+    }
+  }))
+  async uploadMultipleDocuments(
+    @Param('leadId', ParseIntPipe) leadId: number,
+    @UploadedFiles() files: any[],
+    @Body() body: { category?: string; expiryDate?: string; accessRole?: string },
+  ) {
+    if (!files || files.length === 0) throw new BadRequestException('At least one file is required.');
+    const results: any[] = [];
+    for (const file of files) {
+      const doc = await this.documentService.uploadDocument(leadId, file, {
+        category: body.category || 'General',
+        expiryDate: body.expiryDate,
+        accessRole: body.accessRole || 'Sales',
+      });
+      results.push(doc);
+    }
+    return results;
+  }
+
+  @Post(':id/versions/:versionId/restore')
+  @ApiParam({ name: 'id', description: 'Document ID' })
+  @ApiParam({ name: 'versionId', description: 'Version ID to restore' })
+  @ApiOperation({ summary: 'Restore a previous version of a document' })
+  async restoreVersion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('versionId', ParseIntPipe) versionId: number,
+  ) {
+    return this.documentService.restoreVersion(id, versionId, 1);
   }
 
   @Post('cron/check-expiry')

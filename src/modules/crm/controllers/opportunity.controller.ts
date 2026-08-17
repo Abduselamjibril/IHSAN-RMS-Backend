@@ -97,6 +97,25 @@ export class OpportunityController {
     return this.opportunityService.closeLost(+id, body.lossReasonId, body.remarks);
   }
 
+  @Post(':id/reopen')
+  @ApiParam({ name: 'id', description: 'Opportunity ID' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', example: 'Customer re-engaged and budget was increased.' },
+      },
+      required: ['reason'],
+    },
+  })
+  @ApiOperation({ summary: 'Reopen a Lost Opportunity with a required reason' })
+  async reopen(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+  ) {
+    return this.opportunityService.reopenOpportunity(+id, body.reason);
+  }
+
   @Post(':id/activity')
   @ApiParam({ name: 'id', description: 'Opportunity ID' })
   @ApiOperation({ summary: 'Log a customer activity log for the opportunity' })
