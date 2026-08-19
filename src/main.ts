@@ -49,10 +49,17 @@ async function bootstrap() {
   app.use('/api/notifications/telegram', createRateLimiter(5, 15 * 60 * 1000));
   app.use('/api', createRateLimiter(300, 15 * 60 * 1000));
 
-  // Ensure uploads directory exists
+  // Ensure uploads and subdirectories exist
   const uploadsDir = join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  const subDirs = ['documents', 'media', 'floorplans'];
+  for (const sub of subDirs) {
+    const p = join(uploadsDir, sub);
+    if (!fs.existsSync(p)) {
+      fs.mkdirSync(p, { recursive: true });
+    }
   }
 
   // Configure conservative size limits (10MB) instead of Infinity to prevent denial of service

@@ -88,33 +88,67 @@ export class SecuritySeeder {
       roleEntities[r.code] = roleEntity;
     }
 
-    // 3. Grant all permissions to SYS_ADMIN
-    const sysAdminRole = roleEntities['SYS_ADMIN'];
+    // 3. Grant permissions to standard roles
     const allPermissions = await this.permissionRepo.find();
-    const existingSysPerms = await this.rolePermRepo.find({ where: { roleId: sysAdminRole.roleId } });
-    const existingPermIds = new Set(existingSysPerms.map((ep) => ep.permissionId));
 
-    const newSysPerms: RolePermission[] = [];
-    for (const p of allPermissions) {
-      if (!existingPermIds.has(p.permissionId)) {
-        newSysPerms.push(
-          this.rolePermRepo.create({
-            roleId: sysAdminRole.roleId,
-            permissionId: p.permissionId,
-            canView: true,
-            canCreate: true,
-            canEdit: true,
-            canDelete: true,
-            canApprove: true,
-            canExport: true,
-          }),
-        );
+    // Helper to assign role capabilities
+    const assignRolePermissions = async (
+      roleCode: string,
+      filterFn: (permCode: string) => boolean,
+      capabilities: { canView?: boolean; canCreate?: boolean; canEdit?: boolean; canDelete?: boolean; canApprove?: boolean; canExport?: boolean },
+    ) => {
+      const role = roleEntities[roleCode];
+      if (!role) return;
+      const existing = await this.rolePermRepo.find({ where: { roleId: role.roleId } });
+      const existingIds = new Set(existing.map((e) => e.permissionId));
+      const toSave: RolePermission[] = [];
+
+      for (const p of allPermissions) {
+        if (filterFn(p.permissionCode) && !existingIds.has(p.permissionId)) {
+          toSave.push(
+            this.rolePermRepo.create({
+              roleId: role.roleId,
+              permissionId: p.permissionId,
+              canView: capabilities.canView ?? true,
+              canCreate: capabilities.canCreate ?? false,
+              canEdit: capabilities.canEdit ?? false,
+              canDelete: capabilities.canDelete ?? false,
+              canApprove: capabilities.canApprove ?? false,
+              canExport: capabilities.canExport ?? false,
+            }),
+          );
+        }
       }
-    }
-    if (newSysPerms.length > 0) {
-      await this.rolePermRepo.save(newSysPerms);
-      this.logger.log(`Assigned ${newSysPerms.length} permissions to System Administrator role.`);
-    }
+      if (toSave.length > 0) {
+        await this.rolePermRepo.save(toSave);
+        this.logger.log(`Assigned ${toSave.length} permissions to role: ${roleCode}`);
+      }
+    };
+
+    // SYS_ADMIN gets everything
+    await assignRolePermissions('SYS_ADMIN', () => true, {
+      canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true,
+    });
+
+    // INV_MGR (Inventory Manager): full Property & Unit & Approvals
+    await assignRolePermissions('INV_MGR', (code) => code.startsWith('property.'), {
+      canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true,
+    });
+
+    // SALES_MGR (Sales Manager): view inventory, submit/approve price changes, promotions
+    await assignRolePermissions('SALES_MGR', (code) => code.startsWith('property.'), {
+      canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: true, canExport: true,
+    });
+
+    // SALES_OFFICER (Sales Executive): view units, submit price change requests (canCreate: true, canApprove: false)
+    await assignRolePermissions('SALES_OFFICER', (code) => code.startsWith('property.units.') || code.startsWith('property.pricing.change_requests') || code.startsWith('property.properties.'), {
+      canView: true, canCreate: true, canEdit: false, canDelete: false, canApprove: false, canExport: true,
+    });
+
+    // EXEC (Executive Management): view and export everything
+    await assignRolePermissions('EXEC', () => true, {
+      canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canExport: true,
+    });
 
     // 4. Seed Default Admin User
     let adminUser = await this.userRepo.findOne({ where: { username: 'admin' } });
@@ -148,7 +182,7 @@ export class SecuritySeeder {
       // Link User to SYS_ADMIN Role
       const userRoleRelation = this.userRoleRepo.create({
         userId: adminUser.userId,
-        roleId: sysAdminRole.roleId,
+        roleId: roleEntities['SYS_ADMIN'].roleId,
         effectiveFromDate: new Date(),
         isActive: true,
       });

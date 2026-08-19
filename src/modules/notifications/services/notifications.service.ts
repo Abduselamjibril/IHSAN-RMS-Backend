@@ -61,6 +61,7 @@ export class NotificationsService implements OnModuleInit {
         { code: 'RESERVATION', name: 'Reservation Expiry & Confirms' },
         { code: 'FOLLOWUP', name: 'CRM & Lead Follow-ups' },
         { code: 'SYSTEM', name: 'System and Approvals Workflow' },
+        { code: 'MARKETING', name: 'Quotation & Sales Marketing Notices' },
       ];
       for (const cat of categories) {
         const exists = await this.categoryRepo.findOne({ where: { categoryCode: cat.code } });
@@ -241,7 +242,22 @@ export class NotificationsService implements OnModuleInit {
       // Resolve Delivery Channels based on preference & template rules
       let channelsToDeliver = templateChannel ? [templateChannel] : defaultChannels;
       
-      if (templateChannel) {
+      if (dto.channelCode) {
+        if (dto.channelCode === 'EMAIL_TELEGRAM') {
+          channelsToDeliver = defaultChannels.filter(c => c.channelCode === 'EMAIL' || c.channelCode === 'TELEGRAM');
+        } else if (dto.channelCode === 'EMAIL_INAPP') {
+          channelsToDeliver = defaultChannels.filter(c => c.channelCode === 'EMAIL' || c.channelCode === 'INAPP');
+        } else if (dto.channelCode === 'TELEGRAM_INAPP') {
+          channelsToDeliver = defaultChannels.filter(c => c.channelCode === 'TELEGRAM' || c.channelCode === 'INAPP');
+        } else if (dto.channelCode === 'ALL') {
+          channelsToDeliver = defaultChannels.filter(c => ['EMAIL', 'TELEGRAM', 'INAPP'].includes(c.channelCode));
+        } else {
+          const explicitChannel = defaultChannels.find(c => c.channelCode === dto.channelCode);
+          if (explicitChannel) {
+            channelsToDeliver = [explicitChannel];
+          }
+        }
+      } else if (templateChannel) {
         if (templateChannel.channelCode === 'ALL') {
           channelsToDeliver = defaultChannels.filter(c => ['EMAIL', 'TELEGRAM', 'INAPP'].includes(c.channelCode));
         } else if (templateChannel.channelCode === 'EMAIL_TELEGRAM') {
@@ -340,9 +356,16 @@ export class NotificationsService implements OnModuleInit {
               savedItem.notification.notificationBody
             );
           } else if (savedItem.channel.channelCode === 'TELEGRAM') {
+            const cleanText = (savedItem.notification.notificationBody || '')
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+              .replace(/<tr[^>]*>/gi, '\n')
+              .replace(/<[^>]+>/gm, ' ')
+              .replace(/[ \t]+/g, ' ')
+              .trim();
+            const telegramMsg = `🏢 *${savedItem.notification.notificationTitle}*\n\n${cleanText.substring(0, 3800)}`;
             sent = await this.telegramService.sendDirectMessage(
               recipient.phoneNumber!,
-              `*${savedItem.notification.notificationTitle}*\n\n${savedItem.notification.notificationBody}`
+              telegramMsg
             );
           } else if (savedItem.channel.channelCode === 'INAPP') {
             // InApp is instantaneous inside database

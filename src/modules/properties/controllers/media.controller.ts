@@ -1,6 +1,9 @@
 import {
   Controller,
   Post,
+  Put,
+  Delete,
+  Param,
   UseInterceptors,
   UploadedFile,
   Body,
@@ -135,4 +138,33 @@ export class MediaController {
 
     return this.service.uploadFloorPlan(planName, file, propId, bldId, flId, unId, remarks, vNum);
   }
+
+  // --- Media Management Endpoints ---
+
+  @Delete('media/:id')
+  async deleteMedia(@Param('id') id: string) {
+    return this.service.deleteMedia(+id);
+  }
+
+  @Delete('documents/:id')
+  async deleteDocument(@Param('id') id: string) {
+    return this.service.deleteDocument(+id);
+  }
+
+  @Put('properties/:propertyId/media/:id/featured')
+  async setFeaturedMedia(
+    @Param('propertyId') propertyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.service.setFeaturedMedia(+propertyId, +id);
+  }
+
+  @Put('properties/:propertyId/media/reorder')
+  async updateMediaOrder(
+    @Param('propertyId') propertyId: string,
+    @Body('orders') orders: { id: number; displayOrder: number }[],
+  ) {
+    return this.service.updateMediaOrder(+propertyId, orders);
+  }
 }
+

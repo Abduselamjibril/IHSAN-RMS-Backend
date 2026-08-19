@@ -104,10 +104,21 @@ export class DashboardService implements OnModuleInit {
 
     const totalSites = await this.siteRepo.count({ where: { isDeleted: false } });
     const totalProperties = await this.propertyRepo.count({ where: { isDeleted: false } });
-    const availableInventory = await this.unitRepo.count({
+    const allUnits = await this.unitRepo.find({
       relations: { unitStatus: true },
-      where: { isDeleted: false, unitStatus: { statusName: 'AVAILABLE' } },
+      where: { isDeleted: false },
     });
+    const availableInventory = allUnits.filter(
+      (u) => u.unitStatus && u.unitStatus.statusName.toUpperCase() === 'AVAILABLE',
+    ).length;
+    const totalInventoryValue = allUnits
+      .filter(
+        (u) =>
+          u.unitStatus &&
+          (u.unitStatus.statusName.toUpperCase() === 'AVAILABLE' ||
+            u.unitStatus.statusName.toUpperCase() === 'RESERVED'),
+      )
+      .reduce((sum, u) => sum + Number(u.currentPrice || 0), 0);
 
     const contracts = await this.contractRepo.find();
     const unitsSold = contracts.filter(c => c.status === 'ACTIVE' || c.status === 'COMPLETED').length;
@@ -131,6 +142,7 @@ export class DashboardService implements OnModuleInit {
       totalSites,
       totalProperties,
       availableInventory,
+      totalInventoryValue,
       unitsSold,
       totalRevenue,
       totalCollections,

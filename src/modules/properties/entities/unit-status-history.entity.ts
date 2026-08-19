@@ -32,6 +32,9 @@ export class UnitStatusHistory {
   @Column({ name: 'changed_by', type: 'bigint', nullable: true, default: 1 })
   changedBy: number;
 
+  @Column({ name: 'changed_by_name', type: 'varchar', length: 150, nullable: true })
+  changedByName: string;
+
   @CreateDateColumn({ name: 'changed_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   changedAt: Date;
 

@@ -37,13 +37,22 @@ import {
   CreateReservationDto,
   ExtendReservationDto,
   CreateQuotationDto,
+  EmailQuotationDto,
+  ConvertReservationDto,
   CreateBookingDto,
+  RejectBookingDto,
+  FinanceReviewBookingDto,
+  CancelBookingDto,
   CreateAgreementDto,
   CreateContractDto,
   CreateInstallmentPlanDto,
   CreateDiscountRequestDto,
   CreateCommissionRuleDto,
   CreateCommissionDto,
+  UpdateAgreementVersionDto,
+  UpdateContractStatusDto,
+  CreateContractAmendmentDto,
+  SendInstallmentReminderDto,
 } from '../dto/sales.dto';
 
 @Injectable()
@@ -525,7 +534,198 @@ export class SalesService implements OnModuleInit {
     return this.quotationRepo.find({ order: { quotationDate: 'DESC' } });
   }
 
+  async sendQuotationEmail(id: number, dto: EmailQuotationDto): Promise<{ success: boolean; message: string }> {
+    const quotation = await this.quotationRepo.findOne({
+      where: { id },
+      relations: { customer: true, property: true, unit: true, items: true },
+    });
+    if (!quotation) throw new NotFoundException('Quotation not found');
+
+    const recipient = dto.recipientEmail || quotation.customer?.primaryEmail;
+    if (!recipient) {
+      throw new BadRequestException('No recipient email address specified.');
+    }
+
+    const itemsHtml = (quotation.items || []).map(i => `
+      <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">${i.description}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${i.quantity}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">ETB ${Number(i.unitPrice).toLocaleString()}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">ETB ${Number(i.amount).toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    const emailBody = `
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 650px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #ffffff; color: #1e293b;">
+        <div style="background: linear-gradient(135deg, #1e3a8a, #3b82f6); padding: 24px; color: #ffffff;">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 700;">IHSAN REAL ESTATE</h1>
+          <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.9;">Official Price Quotation & Valuation Summary</p>
+        </div>
+        
+        <div style="padding: 24px;">
+          <p>Dear <strong>${quotation.customer?.fullName || 'Valued Client'}</strong>,</p>
+          <p>${dto.message || 'Thank you for your interest in IHSAN Real Estate. Please find below the official quotation breakdown for your selected property unit.'}</p>
+          
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Quotation Ref:</td>
+                <td style="padding: 6px 0; font-weight: bold; text-align: right;">#${quotation.quotationNo}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Property / Project:</td>
+                <td style="padding: 6px 0; font-weight: bold; text-align: right;">${quotation.property?.propertyName || '-'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Unit Code / No:</td>
+                <td style="padding: 6px 0; font-weight: bold; text-align: right;">Unit ${quotation.unit?.unitCode || '-'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Validity Period:</td>
+                <td style="padding: 6px 0; font-weight: bold; text-align: right;">Valid until ${new Date(quotation.validityDate).toLocaleDateString()}</td>
+              </tr>
+            </table>
+          </div>
+
+          <h3 style="font-size: 15px; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; margin-top: 24px;">Financial Breakdown</h3>
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px;">
+            <thead>
+              <tr style="background: #f1f5f9; text-align: left;">
+                <th style="padding: 8px;">Description</th>
+                <th style="padding: 8px; text-align: center;">Qty</th>
+                <th style="padding: 8px; text-align: right;">Unit Price</th>
+                <th style="padding: 8px; text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml || `
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #eee;">Base Valuation</td>
+                  <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">1</td>
+                  <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">ETB ${Number(quotation.basePrice).toLocaleString()}</td>
+                  <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">ETB ${Number(quotation.basePrice).toLocaleString()}</td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 16px; text-align: right; font-size: 14px;">
+            <div style="margin-bottom: 4px; color: #64748b;">Base Price: <strong>ETB ${Number(quotation.basePrice).toLocaleString()}</strong></div>
+            <div style="margin-bottom: 4px; color: #ef4444;">Discount Applied: <strong>- ETB ${Number(quotation.discountAmount || 0).toLocaleString()}</strong></div>
+            <div style="margin-bottom: 6px; color: #64748b;">VAT (15%): <strong>+ ETB ${Number(quotation.vatAmount || 0).toLocaleString()}</strong></div>
+            <div style="font-size: 18px; font-weight: bold; color: #1e3a8a; border-top: 1px solid #bfdbfe; padding-top: 8px;">
+              Final Quotation Value: ETB ${Number(quotation.totalAmount).toLocaleString()}
+            </div>
+          </div>
+
+          <p style="font-size: 12px; color: #94a3b8; margin-top: 24px; text-align: center;">
+            This quotation is valid until ${new Date(quotation.validityDate).toLocaleDateString()}. To secure this property unit, please contact your sales agent to process a reservation.
+          </p>
+        </div>
+      </div>
+    `;
+
+    try {
+      await this.notificationsService.sendNotification({
+        categoryCode: 'MARKETING',
+        channelCode: (dto.recipientPhone || quotation.customer?.primaryPhone) ? 'EMAIL_TELEGRAM' : 'EMAIL',
+        title: dto.subject || `Official Quotation #${quotation.quotationNo} - IHSAN Real Estate`,
+        body: emailBody,
+        referenceTypeId: 'QUOTATION',
+        referenceId: quotation.id,
+        recipients: [
+          {
+            recipientName: quotation.customer?.fullName || 'Client',
+            emailAddress: recipient,
+            phoneNumber: dto.recipientPhone || quotation.customer?.primaryPhone,
+          },
+        ],
+      });
+      await this.notificationsService.processQueue();
+    } catch (err) {
+      this.logger.error(`Failed to dispatch quotation email for #${quotation.quotationNo}`, err);
+    }
+
+    await this.logAudit('SalesQuotation', quotation.id, 'EMAIL_SENT', null, { recipientEmail: recipient, sentAt: new Date() });
+
+    return {
+      success: true,
+      message: `Quotation #${quotation.quotationNo} successfully dispatched to ${recipient}`,
+    };
+  }
+
   // --- Booking Management ---
+
+  async convertReservationToBooking(reservationId: number, dto: ConvertReservationDto): Promise<SalesBooking> {
+    const reservation = await this.reservationRepo.findOne({
+      where: { id: reservationId },
+      relations: { customer: true, property: true, unit: true },
+    });
+    if (!reservation) throw new NotFoundException(`Reservation with ID ${reservationId} not found.`);
+
+    if (reservation.status === 'CONVERTED' || reservation.status === 'CONVERTED_TO_BOOKING') {
+      throw new BadRequestException('This reservation has already been converted to a booking.');
+    }
+
+    const quotation = dto.quotationId ? await this.quotationRepo.findOne({ where: { id: dto.quotationId } }) : null;
+    const refNo = 'BKG-' + Date.now().toString().slice(-8);
+
+    const booking = this.bookingRepo.create({
+      bookingNo: refNo,
+      reservation,
+      quotation: quotation || null,
+      customer: reservation.customer,
+      property: reservation.property,
+      unit: reservation.unit,
+      bookingDate: new Date(),
+      bookingAmount: dto.bookingAmount || reservation.reservationFee || 100000,
+      status: 'PENDING_SALES',
+      approvalStage: 'PENDING_SALES',
+      remarks: dto.remarks || `Converted from Reservation #${reservation.reservationNo}`,
+      createdBy: dto.createdById || 1,
+    });
+
+    const savedBooking = await this.bookingRepo.save(booking);
+
+    // Update reservation status
+    reservation.status = 'CONVERTED';
+    await this.reservationRepo.save(reservation);
+
+    // Update unit status to Booked
+    const bookedStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Booked' } }) ||
+                         await this.unitStatusRepo.findOne({ where: { statusName: 'Reserved' } });
+    if (bookedStatus && reservation.unit) {
+      const oldStatus = reservation.unit.unitStatus;
+      reservation.unit.unitStatus = bookedStatus;
+      await this.unitRepo.save(reservation.unit);
+
+      const history = this.unitStatusHistoryRepo.create({
+        unit: reservation.unit,
+        oldStatus,
+        newStatus: bookedStatus,
+        reason: `Reservation converted to Booking ref: ${refNo}`,
+      });
+      await this.unitStatusHistoryRepo.save(history);
+    }
+
+    await this.logAudit('SalesBooking', savedBooking.id, 'CONVERT_FROM_RESERVATION', null, savedBooking);
+
+    // Notify Sales Manager
+    try {
+      await this.notificationsService.sendNotification({
+        categoryCode: 'BOOKING',
+        title: `New Booking Pending Sales Approval - #${refNo}`,
+        body: `Booking #${refNo} for Unit ${reservation.unit?.unitCode} has been converted from Reservation #${reservation.reservationNo} and is awaiting Sales Manager approval.`,
+        referenceTypeId: 'BOOKING',
+        referenceId: savedBooking.id,
+        recipients: [{ recipientName: 'Sales Manager', emailAddress: 'salesmgr@ihsanrems.com' }],
+      });
+    } catch (e) {
+      this.logger.error('Failed to notify manager of converted booking', e);
+    }
+
+    return savedBooking;
+  }
 
   async createBooking(dto: CreateBookingDto): Promise<SalesBooking> {
     if (dto.bookingAmount >= 1e16) {
@@ -554,19 +754,23 @@ export class SalesService implements OnModuleInit {
       unit,
       bookingDate: dto.bookingDate,
       bookingAmount: dto.bookingAmount,
-      status: 'PENDING',
+      status: 'PENDING_SALES',
+      approvalStage: 'PENDING_SALES',
+      remarks: dto.remarks,
     });
 
     const savedBooking = await this.bookingRepo.save(booking);
 
     // If reservation exists, update its status
     if (reservation) {
-      reservation.status = 'CONVERTED_TO_BOOKING';
+      reservation.status = 'CONVERTED';
       await this.reservationRepo.save(reservation);
     }
 
     return savedBooking;
   }
+
+  // --- Two-Tier Booking Approvals (Sales Manager -> Finance Officer) ---
 
   async approveBooking(id: number, approverId: number): Promise<SalesBooking> {
     const booking = await this.bookingRepo.findOne({ 
@@ -576,54 +780,172 @@ export class SalesService implements OnModuleInit {
     if (!booking) throw new NotFoundException('Booking not found');
 
     const oldValue = { ...booking };
-    booking.status = 'APPROVED';
+
+    // Stage 1: Sales Manager approves -> advances to PENDING_FINANCE
+    booking.status = 'PENDING_FINANCE';
+    booking.approvalStage = 'PENDING_FINANCE';
+    booking.salesApprovedBy = approverId;
+    booking.salesApprovedAt = new Date();
     booking.approvedBy = approverId;
     booking.approvedAt = new Date();
 
     const saved = await this.bookingRepo.save(booking);
 
-    // Transition linked quotation status to ACCEPTED
-    if (booking.quotation) {
-      booking.quotation.status = 'ACCEPTED';
-      await this.quotationRepo.save(booking.quotation);
-    }
+    await this.logAudit('SalesBooking', saved.id, 'SALES_APPROVE', oldValue, saved);
 
-    // Transition unit status to Sold
-    const soldStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Sold' } });
-    const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
-    if (unit && soldStatus) {
-      const oldStatus = unit.unitStatus;
-      unit.unitStatus = soldStatus;
-      unit.reservationExpiry = null;
-      unit.soldDate = new Date();
-      await this.unitRepo.save(unit);
-
-      const history = this.unitStatusHistoryRepo.create({
-        unit,
-        oldStatus,
-        newStatus: soldStatus,
-        reason: `Booking approved ref: ${booking.bookingNo}`,
-      });
-      await this.unitStatusHistoryRepo.save(history);
-    }
-
-    await this.logAudit('SalesBooking', saved.id, 'APPROVE', oldValue, saved);
-
+    // Notify Finance Department
     try {
-      await this.brokerService.handleSalesEvent('BOOKING_APPROVED', saved);
+      await this.notificationsService.sendNotification({
+        categoryCode: 'FINANCE',
+        title: `Booking #${booking.bookingNo} Awaiting Finance Approval`,
+        body: `Booking #${booking.bookingNo} has been approved by Sales and is now pending Finance review and payment verification.`,
+        referenceTypeId: 'BOOKING',
+        referenceId: saved.id,
+        recipients: [{ recipientName: 'Finance Officer', emailAddress: 'finance@ihsanrems.com' }],
+      });
     } catch (e) {
-      this.logger.error('Failed to trigger broker booking approved event', e);
+      this.logger.error('Failed to notify finance of booking approval', e);
     }
 
     return saved;
   }
 
-  async cancelBooking(id: number): Promise<SalesBooking> {
+  async financeReviewBooking(id: number, dto: FinanceReviewBookingDto): Promise<SalesBooking> {
+    const booking = await this.bookingRepo.findOne({
+      where: { id },
+      relations: { unit: true, quotation: true, customer: true, property: true },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const oldValue = { ...booking };
+
+    if (dto.action === 'APPROVE') {
+      booking.status = 'APPROVED';
+      booking.approvalStage = 'APPROVED';
+      booking.financeApprovedBy = dto.financeOfficerId || 1;
+      booking.financeApprovedAt = new Date();
+      booking.financeComment = dto.comment || 'Down payment & bank slip verified';
+
+      const saved = await this.bookingRepo.save(booking);
+
+      // Transition linked quotation to ACCEPTED
+      if (booking.quotation) {
+        booking.quotation.status = 'ACCEPTED';
+        await this.quotationRepo.save(booking.quotation);
+      }
+
+      // Transition unit to Sold
+      const soldStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Sold' } });
+      const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
+      if (unit && soldStatus) {
+        const oldStatus = unit.unitStatus;
+        unit.unitStatus = soldStatus;
+        unit.reservationExpiry = null;
+        unit.soldDate = new Date();
+        await this.unitRepo.save(unit);
+
+        const history = this.unitStatusHistoryRepo.create({
+          unit,
+          oldStatus,
+          newStatus: soldStatus,
+          reason: `Booking final finance approved ref: ${booking.bookingNo}`,
+        });
+        await this.unitStatusHistoryRepo.save(history);
+      }
+
+      await this.logAudit('SalesBooking', saved.id, 'FINANCE_APPROVE', oldValue, saved);
+
+      try {
+        await this.brokerService.handleSalesEvent('BOOKING_APPROVED', saved);
+      } catch (e) {
+        this.logger.error('Failed to trigger broker booking approved event', e);
+      }
+
+      return saved;
+    } else {
+      // Finance rejects
+      booking.status = 'REJECTED';
+      booking.approvalStage = 'REJECTED';
+      booking.financeComment = dto.comment || 'Finance verification failed';
+      booking.rejectionReason = dto.comment || 'Rejected during Finance Review';
+
+      const saved = await this.bookingRepo.save(booking);
+
+      // Revert unit to Available
+      const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Available' } });
+      const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
+      if (unit && availableStatus) {
+        const oldStatus = unit.unitStatus;
+        unit.unitStatus = availableStatus;
+        unit.soldDate = null;
+        await this.unitRepo.save(unit);
+
+        const history = this.unitStatusHistoryRepo.create({
+          unit,
+          oldStatus,
+          newStatus: availableStatus,
+          reason: `Booking finance rejected ref: ${booking.bookingNo}. Reason: ${dto.comment || 'Finance rejected'}`,
+        });
+        await this.unitStatusHistoryRepo.save(history);
+      }
+
+      await this.logAudit('SalesBooking', saved.id, 'FINANCE_REJECT', oldValue, saved);
+
+      return saved;
+    }
+  }
+
+  async rejectBooking(id: number, dto: RejectBookingDto): Promise<SalesBooking> {
+    if (!dto.rejectionReason || !dto.rejectionReason.trim()) {
+      throw new BadRequestException('Rejection reason is mandatory.');
+    }
+
+    const booking = await this.bookingRepo.findOne({
+      where: { id },
+      relations: { unit: true, quotation: true },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const oldValue = { ...booking };
+    booking.status = 'REJECTED';
+    booking.approvalStage = 'REJECTED';
+    booking.rejectionReason = dto.rejectionReason.trim();
+
+    const saved = await this.bookingRepo.save(booking);
+
+    // Revert unit to Available
+    const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Available' } });
+    const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
+    if (unit && availableStatus) {
+      const oldStatus = unit.unitStatus;
+      unit.unitStatus = availableStatus;
+      unit.soldDate = null;
+      await this.unitRepo.save(unit);
+
+      const history = this.unitStatusHistoryRepo.create({
+        unit,
+        oldStatus,
+        newStatus: availableStatus,
+        reason: `Booking rejected ref: ${booking.bookingNo}. Reason: ${dto.rejectionReason}`,
+      });
+      await this.unitStatusHistoryRepo.save(history);
+    }
+
+    await this.logAudit('SalesBooking', saved.id, 'REJECT', oldValue, saved);
+
+    return saved;
+  }
+
+  async cancelBooking(id: number, dto?: CancelBookingDto): Promise<SalesBooking> {
     const booking = await this.bookingRepo.findOne({ where: { id }, relations: { unit: true } });
     if (!booking) throw new NotFoundException('Booking not found');
 
     const oldValue = { ...booking };
     booking.status = 'CANCELLED';
+    booking.approvalStage = 'CANCELLED';
+    if (dto?.cancellationReason) {
+      booking.cancellationReason = dto.cancellationReason.trim();
+    }
     const saved = await this.bookingRepo.save(booking);
 
     // Return unit to Available
@@ -639,7 +961,7 @@ export class SalesService implements OnModuleInit {
         unit,
         oldStatus,
         newStatus: availableStatus,
-        reason: `Booking cancelled ref: ${booking.bookingNo}`,
+        reason: `Booking cancelled ref: ${booking.bookingNo}. Reason: ${booking.cancellationReason || 'Client cancellation'}`,
       });
       await this.unitStatusHistoryRepo.save(history);
     }
@@ -782,6 +1104,186 @@ export class SalesService implements OnModuleInit {
 
   async findAllContracts(): Promise<SalesContract[]> {
     return this.contractRepo.find({ order: { createdAt: 'DESC' } });
+  }
+
+  async updateAgreementVersion(id: number, dto: UpdateAgreementVersionDto): Promise<SalesAgreement> {
+    const agreement = await this.agreementRepo.findOne({
+      where: { id },
+      relations: { booking: { property: true, unit: true }, customer: true }
+    });
+    if (!agreement) throw new NotFoundException('Agreement not found');
+
+    const oldValue = { ...agreement };
+    agreement.agreementVersion = (agreement.agreementVersion || 1) + 1;
+    if (dto.agreementDocument) {
+      agreement.agreementDocument = dto.agreementDocument;
+    }
+
+    const saved = await this.agreementRepo.save(agreement);
+    await this.logAudit('SalesAgreement', saved.id, 'VERSION_INCREMENT', oldValue, {
+      version: saved.agreementVersion,
+      remarks: dto.changeRemarks || `Version incremented to v${saved.agreementVersion}.0`,
+      modifiedAt: new Date(),
+    });
+
+    return saved;
+  }
+
+  async getAgreementHistory(id: number): Promise<any[]> {
+    return this.auditLogRepo.find({
+      where: { entityName: 'SalesAgreement', entityId: id },
+      order: { changedAt: 'DESC' },
+    });
+  }
+
+  async updateContractStatus(id: number, dto: UpdateContractStatusDto): Promise<SalesContract> {
+    const contract = await this.contractRepo.findOne({
+      where: { id },
+      relations: { agreement: { booking: { unit: true } }, customer: true, property: true }
+    });
+    if (!contract) throw new NotFoundException('Contract not found');
+
+    const validStatuses = ['DRAFT', 'UNDER_REVIEW', 'PENDING_SIGNATURE', 'SIGNED', 'ACTIVE', 'COMPLETED', 'TERMINATED', 'CANCELLED'];
+    if (!validStatuses.includes(dto.status.toUpperCase())) {
+      throw new BadRequestException(`Invalid contract status. Allowed statuses: ${validStatuses.join(', ')}`);
+    }
+
+    const oldValue = { ...contract };
+    contract.status = dto.status.toUpperCase();
+    if (dto.remarks) {
+      contract.remarks = dto.remarks;
+    }
+
+    const saved = await this.contractRepo.save(contract);
+    await this.logAudit('SalesContract', saved.id, 'STATUS_CHANGE', oldValue, {
+      newStatus: saved.status,
+      remarks: dto.remarks || `Contract status updated to ${saved.status}`,
+    });
+
+    return saved;
+  }
+
+  async createContractAmendment(id: number, dto: CreateContractAmendmentDto): Promise<any> {
+    const contract = await this.contractRepo.findOne({
+      where: { id },
+      relations: { customer: true, property: true }
+    });
+    if (!contract) throw new NotFoundException('Contract not found');
+
+    const amendmentPayload = {
+      amendmentNo: 'AMD-' + Date.now().toString().slice(-6),
+      amendmentType: dto.amendmentType,
+      amendmentDescription: dto.amendmentDescription,
+      adjustedAmount: dto.adjustedAmount,
+      effectiveDate: dto.effectiveDate || new Date(),
+      remarks: dto.remarks || 'Contract amendment approved',
+      createdAt: new Date(),
+    };
+
+    if (dto.adjustedAmount && dto.adjustedAmount > 0) {
+      contract.contractAmount = dto.adjustedAmount;
+      await this.contractRepo.save(contract);
+    }
+
+    await this.logAudit('SalesContract', contract.id, 'CONTRACT_AMENDMENT', null, amendmentPayload);
+
+    return {
+      success: true,
+      message: `Amendment #${amendmentPayload.amendmentNo} registered successfully`,
+      amendment: amendmentPayload,
+      contract,
+    };
+  }
+
+  async getContractAmendments(id: number): Promise<any[]> {
+    const logs = await this.auditLogRepo.find({
+      where: { entityName: 'SalesContract', entityId: id, action: 'CONTRACT_AMENDMENT' },
+      order: { changedAt: 'DESC' },
+    });
+    return logs.map(log => log.newValue);
+  }
+
+  async sendInstallmentReminder(id: number, dto: SendInstallmentReminderDto): Promise<any> {
+    const installment = await this.scheduleRepo.findOne({
+      where: { id },
+      relations: { contract: { customer: true, property: true, agreement: { booking: { unit: true } } } },
+    });
+    if (!installment) throw new NotFoundException('Installment schedule not found');
+
+    const customer = installment.contract?.customer;
+    const property = installment.contract?.property;
+    const unit = installment.contract?.agreement?.booking?.unit;
+
+    const emailBody = `
+      <div style="font-family: Arial, sans-serif; color: #1e293b; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: #0f172a; padding: 24px; text-align: center; color: white;">
+          <h2 style="margin: 0; color: #38bdf8; font-size: 20px;">IHSAN REAL ESTATE</h2>
+          <p style="margin: 4px 0 0 0; font-size: 13px; color: #94a3b8;">Official Payment Reminder Notice</p>
+        </div>
+        <div style="padding: 24px; background: #ffffff;">
+          <p>Dear <strong>${customer?.fullName || 'Valued Client'}</strong>,</p>
+          <p>This is a payment reminder for your scheduled installment on <strong>Contract #${installment.contract?.contractNo}</strong>.</p>
+          
+          <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 8px; color: #64748b;">Installment Sequence</td>
+              <td style="padding: 8px; font-weight: bold; text-align: right;">Installment #${installment.installmentNo}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 8px; color: #64748b;">Property / Unit</td>
+              <td style="padding: 8px; font-weight: bold; text-align: right;">${property?.propertyName || ''} - Unit ${unit?.unitNumber || unit?.unitCode || 'Unit'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 8px; color: #64748b;">Due Date</td>
+              <td style="padding: 8px; font-weight: bold; color: #dc2626; text-align: right;">${new Date(installment.dueDate).toLocaleDateString()}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f8fafc;">
+              <td style="padding: 10px; font-weight: bold;">Amount Due</td>
+              <td style="padding: 10px; font-weight: bold; color: #0284c7; text-align: right; font-size: 16px;">ETB ${Number(installment.installmentAmount).toLocaleString()}</td>
+            </tr>
+          </table>
+
+          ${dto.customNote ? `<div style="background-color: #f1f5f9; padding: 12px; border-radius: 6px; font-size: 13px; margin: 16px 0;"><strong>Note:</strong> ${dto.customNote}</div>` : ''}
+
+          <p style="font-size: 12px; color: #64748b;">Please proceed with your deposit into our designated bank account and share your deposit receipt with your assigned account manager.</p>
+        </div>
+      </div>
+    `;
+
+    const channel = dto.channelCode || (customer?.primaryPhone ? 'EMAIL_TELEGRAM' : 'EMAIL');
+
+    try {
+      await this.notificationsService.sendNotification({
+        categoryCode: 'MARKETING',
+        channelCode: channel,
+        title: `Payment Reminder: Installment #${installment.installmentNo} for Contract #${installment.contract?.contractNo}`,
+        body: emailBody,
+        referenceTypeId: 'INSTALLMENT',
+        referenceId: installment.id,
+        recipients: [
+          {
+            recipientName: customer?.fullName || 'Client',
+            emailAddress: customer?.primaryEmail,
+            phoneNumber: customer?.primaryPhone,
+          },
+        ],
+      });
+      await this.notificationsService.processQueue();
+    } catch (err) {
+      this.logger.error(`Failed to dispatch installment reminder for #${installment.id}`, err);
+    }
+
+    await this.logAudit('InstallmentSchedule', installment.id, 'REMINDER_SENT', null, {
+      installmentNo: installment.installmentNo,
+      dueDate: installment.dueDate,
+      channel,
+      sentAt: new Date(),
+    });
+
+    return {
+      success: true,
+      message: `Installment reminder notice dispatched successfully to ${customer?.fullName || 'Customer'}.`,
+    };
   }
 
   // --- Installment Plan & Scheduler ---

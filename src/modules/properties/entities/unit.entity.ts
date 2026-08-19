@@ -98,6 +98,9 @@ export class Unit {
   @Column({ name: 'is_featured', type: 'boolean', default: false })
   isFeatured: boolean;
 
+  @Column({ name: 'is_negotiable', type: 'boolean', default: false })
+  isNegotiable: boolean;
+
   @Column({ name: 'inventory_tags', type: 'text', array: true, nullable: true })
   inventoryTags: string[];
 

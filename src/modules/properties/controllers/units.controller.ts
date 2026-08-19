@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   UseInterceptors,
   UploadedFile,
   BadRequestException,
@@ -41,9 +42,16 @@ export class UnitsController {
     return this.service.findOneUnit(+id);
   }
 
+  @Get(':id/audit-log')
+  getUnitAuditLog(@Param('id') id: string) {
+    return this.service.getUnitAuditLog(+id);
+  }
+
   @Put(':id')
-  updateUnit(@Param('id') id: string, @Body() dto: UpdateUnitDto) {
-    return this.service.updateUnit(+id, dto);
+  updateUnit(@Param('id') id: string, @Body() dto: UpdateUnitDto, @Req() req: any) {
+    const user = req.user;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.updateUnit(+id, dto, username);
   }
 
   @Delete(':id')
@@ -52,8 +60,11 @@ export class UnitsController {
   }
 
   @Put(':id/status')
-  transitionStatus(@Param('id') id: string, @Body() dto: UpdateUnitStatusDto) {
-    return this.service.transitionStatus(+id, dto);
+  transitionStatus(@Param('id') id: string, @Body() dto: UpdateUnitStatusDto, @Req() req: any) {
+    const user = req.user;
+    const userId = user?.userId || 1;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.transitionStatus(+id, dto, userId, username);
   }
 
   @Post('import')

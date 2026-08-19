@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UnitPrice } from '../entities/unit-price.entity';
@@ -7,7 +7,12 @@ import { PricePromotion } from '../entities/price-promotion.entity';
 import { Unit } from '../entities/unit.entity';
 import { Property } from '../entities/property.entity';
 import { UnitType } from '../entities/unit-type.entity';
-import { CreateUnitPriceDto, CreatePromotionDto } from '../dto/unit-crud.dto';
+import { PriceChangeRequest } from '../entities/price-change-request.entity';
+import {
+  CreateUnitPriceDto,
+  CreatePromotionDto,
+  CreatePriceChangeRequestDto,
+} from '../dto/unit-crud.dto';
 
 @Injectable()
 export class PricingService {
@@ -24,10 +29,11 @@ export class PricingService {
     private readonly propertyRepo: Repository<Property>,
     @InjectRepository(UnitType)
     private readonly unitTypeRepo: Repository<UnitType>,
+    @InjectRepository(PriceChangeRequest)
+    private readonly priceChangeRepo: Repository<PriceChangeRequest>,
   ) {}
 
-  async createUnitPrice(dto: CreateUnitPriceDto): Promise<UnitPrice> {
-    console.log('CREATE UNIT PRICE DTO:', dto);
+  async createUnitPrice(dto: CreateUnitPriceDto, user?: any): Promise<UnitPrice> {
     const unit = await this.unitRepo.findOne({ where: { id: dto.unitId, isDeleted: false } });
     if (!unit) throw new NotFoundException(`Unit with ID ${dto.unitId} not found.`);
 
@@ -36,7 +42,7 @@ export class PricingService {
       where: { unit: { id: dto.unitId }, isActive: true },
     });
 
-    let oldPrice = 0;
+    let oldPrice = unit.currentPrice ? Number(unit.currentPrice) : 0;
     if (currentActive) {
       oldPrice = Number(currentActive.basePrice);
       currentActive.isActive = false;
@@ -54,24 +60,155 @@ export class PricingService {
       ...dto,
       unit,
       finalPrice,
+      isNegotiable: dto.isNegotiable ?? false,
       isActive: true,
+      createdBy: user?.userId || 1,
     });
     const savedPrice = await this.unitPriceRepo.save(price);
 
-    // Update unit's current price
+    // Update unit's current price & negotiable flag
     unit.currentPrice = base;
+    if (dto.isNegotiable !== undefined) {
+      unit.isNegotiable = dto.isNegotiable;
+    }
+    if (dto.currencyCode) {
+      unit.currencyCode = dto.currencyCode;
+    }
     await this.unitRepo.save(unit);
 
-    // Write pricing history
+    // Write immutable pricing history
     const history = this.unitPriceHistoryRepo.create({
+      unit,
       unitPrice: savedPrice,
       oldPrice,
       newPrice: base,
+      currencyCode: dto.currencyCode || 'ETB',
+      isNegotiable: !!dto.isNegotiable,
       changeReason: dto.remarks || 'Active unit price updated',
+      changedBy: user?.userId || 1,
+      changedByName: user?.fullName || 'System Administrator',
     });
     await this.unitPriceHistoryRepo.save(history);
 
     return savedPrice;
+  }
+
+  async getUnitPriceHistory(unitId: number): Promise<UnitPriceHistory[]> {
+    return this.unitPriceHistoryRepo.createQueryBuilder('history')
+      .leftJoinAndSelect('history.unit', 'unit')
+      .leftJoinAndSelect('history.unitPrice', 'unitPrice')
+      .where('history.unit.id = :unitId OR unitPrice.unit.id = :unitId', { unitId })
+      .orderBy('history.changedAt', 'DESC')
+      .getMany();
+  }
+
+  async createPriceChangeRequest(dto: CreatePriceChangeRequestDto, user?: any): Promise<PriceChangeRequest> {
+    const unit = await this.unitRepo.findOne({ where: { id: dto.unitId, isDeleted: false } });
+    if (!unit) throw new NotFoundException(`Unit with ID ${dto.unitId} not found.`);
+
+    const currentPrice = unit.currentPrice ? Number(unit.currentPrice) : 0;
+    const request = this.priceChangeRepo.create({
+      unit,
+      currentPrice,
+      proposedPrice: Number(dto.proposedPrice),
+      currencyCode: dto.currencyCode || 'ETB',
+      isNegotiable: dto.isNegotiable ?? unit.isNegotiable ?? false,
+      reason: dto.reason,
+      status: 'PENDING',
+      requestedBy: user?.userId || 1,
+      requestedByName: user?.fullName || 'Sales Executive',
+    });
+
+    return this.priceChangeRepo.save(request);
+  }
+
+  async getPriceChangeRequests(status?: string): Promise<PriceChangeRequest[]> {
+    const query = this.priceChangeRepo.createQueryBuilder('request')
+      .leftJoinAndSelect('request.unit', 'unit')
+      .leftJoinAndSelect('unit.property', 'property')
+      .leftJoinAndSelect('unit.building', 'building')
+      .leftJoinAndSelect('unit.floor', 'floor')
+      .orderBy('request.requestedAt', 'DESC');
+
+    if (status) {
+      query.where('request.status = :status', { status: status.toUpperCase() });
+    }
+
+    return query.getMany();
+  }
+
+  async approvePriceChangeRequest(id: number, user?: any, comment?: string): Promise<PriceChangeRequest> {
+    const request = await this.priceChangeRepo.findOne({
+      where: { id },
+      relations: { unit: true },
+    });
+    if (!request) throw new NotFoundException(`Price change request #${id} not found.`);
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException(`Request #${id} is already processed (${request.status}).`);
+    }
+
+    request.status = 'APPROVED';
+    request.reviewedBy = user?.userId || 1;
+    request.reviewedByName = user?.fullName || 'Property Manager';
+    request.reviewedAt = new Date();
+    request.reviewComment = comment || 'Approved by management';
+    const savedRequest = await this.priceChangeRepo.save(request);
+
+    // Apply the price change to the Unit
+    const unit = request.unit;
+    const oldPrice = unit.currentPrice ? Number(unit.currentPrice) : 0;
+    const newPrice = Number(request.proposedPrice);
+
+    unit.currentPrice = newPrice;
+    unit.isNegotiable = !!request.isNegotiable;
+    unit.currencyCode = request.currencyCode || 'ETB';
+    await this.unitRepo.save(unit);
+
+    // Create unit price record
+    const price = this.unitPriceRepo.create({
+      unit,
+      basePrice: newPrice,
+      finalPrice: newPrice,
+      currencyCode: request.currencyCode || 'ETB',
+      isNegotiable: !!request.isNegotiable,
+      effectiveFrom: new Date(),
+      isActive: true,
+      remarks: `Applied from approved Price Change Request #${request.id}`,
+      createdBy: user?.userId || 1,
+    });
+    const savedPrice = await this.unitPriceRepo.save(price);
+
+    // Write pricing history
+    const history = this.unitPriceHistoryRepo.create({
+      unit,
+      unitPrice: savedPrice,
+      oldPrice,
+      newPrice,
+      currencyCode: request.currencyCode || 'ETB',
+      isNegotiable: !!request.isNegotiable,
+      changeReason: `Approval ref #${request.id}: ${comment || request.reason}`,
+      changedBy: user?.userId || 1,
+      changedByName: user?.fullName || 'Property Manager',
+    });
+    await this.unitPriceHistoryRepo.save(history);
+
+    return savedRequest;
+  }
+
+  async rejectPriceChangeRequest(id: number, user?: any, comment?: string): Promise<PriceChangeRequest> {
+    const request = await this.priceChangeRepo.findOne({ where: { id }, relations: { unit: true } });
+    if (!request) throw new NotFoundException(`Price change request #${id} not found.`);
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException(`Request #${id} is already processed (${request.status}).`);
+    }
+
+    request.status = 'REJECTED';
+    request.reviewedBy = user?.userId || 1;
+    request.reviewedByName = user?.fullName || 'Property Manager';
+    request.reviewedAt = new Date();
+    request.reviewComment = comment || 'Rejected by management';
+
+    return this.priceChangeRepo.save(request);
   }
 
   async createPromotion(dto: CreatePromotionDto): Promise<PricePromotion> {

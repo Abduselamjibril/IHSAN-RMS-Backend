@@ -24,12 +24,21 @@ import {
   CreateReservationDto,
   ExtendReservationDto,
   CreateQuotationDto,
+  EmailQuotationDto,
+  ConvertReservationDto,
   CreateBookingDto,
+  RejectBookingDto,
+  FinanceReviewBookingDto,
+  CancelBookingDto,
   CreateAgreementDto,
   CreateContractDto,
   CreateInstallmentPlanDto,
   CreateDiscountRequestDto,
   CreateCommissionRuleDto,
+  UpdateAgreementVersionDto,
+  UpdateContractStatusDto,
+  CreateContractAmendmentDto,
+  SendInstallmentReminderDto,
 } from '../dto/sales.dto';
 
 @ApiTags('Sales Management')
@@ -108,6 +117,17 @@ export class SalesController {
     return this.service.findAllQuotations();
   }
 
+  @Post('quotations/:id/email')
+  sendQuotationEmail(@Param('id') id: string, @Body() dto: EmailQuotationDto) {
+    return this.service.sendQuotationEmail(+id, dto);
+  }
+
+  // --- Reservations Conversion ---
+  @Post('reservations/:id/convert-to-booking')
+  convertReservationToBooking(@Param('id') id: string, @Body() dto: ConvertReservationDto) {
+    return this.service.convertReservationToBooking(+id, dto);
+  }
+
   // --- Bookings ---
   @Post('bookings')
   createBooking(@Body() dto: CreateBookingDto) {
@@ -124,9 +144,19 @@ export class SalesController {
     return this.service.approveBooking(+id, approverId || 1);
   }
 
+  @Put('bookings/:id/reject')
+  rejectBooking(@Param('id') id: string, @Body() dto: RejectBookingDto) {
+    return this.service.rejectBooking(+id, dto);
+  }
+
+  @Put('bookings/:id/finance-review')
+  financeReviewBooking(@Param('id') id: string, @Body() dto: FinanceReviewBookingDto) {
+    return this.service.financeReviewBooking(+id, dto);
+  }
+
   @Put('bookings/:id/cancel')
-  cancelBooking(@Param('id') id: string) {
-    return this.service.cancelBooking(+id);
+  cancelBooking(@Param('id') id: string, @Body() dto?: CancelBookingDto) {
+    return this.service.cancelBooking(+id, dto);
   }
 
   // --- Agreements ---
@@ -140,6 +170,16 @@ export class SalesController {
     return this.service.findAllAgreements();
   }
 
+  @Put('agreements/:id/version')
+  updateAgreementVersion(@Param('id') id: string, @Body() dto: UpdateAgreementVersionDto) {
+    return this.service.updateAgreementVersion(+id, dto);
+  }
+
+  @Get('agreements/:id/history')
+  getAgreementHistory(@Param('id') id: string) {
+    return this.service.getAgreementHistory(+id);
+  }
+
   // --- Contracts ---
   @Post('contracts')
   createContract(@Body() dto: CreateContractDto) {
@@ -149,6 +189,21 @@ export class SalesController {
   @Get('contracts')
   findAllContracts() {
     return this.service.findAllContracts();
+  }
+
+  @Put('contracts/:id/status')
+  updateContractStatus(@Param('id') id: string, @Body() dto: UpdateContractStatusDto) {
+    return this.service.updateContractStatus(+id, dto);
+  }
+
+  @Post('contracts/:id/amendments')
+  createContractAmendment(@Param('id') id: string, @Body() dto: CreateContractAmendmentDto) {
+    return this.service.createContractAmendment(+id, dto);
+  }
+
+  @Get('contracts/:id/amendments')
+  getContractAmendments(@Param('id') id: string) {
+    return this.service.getContractAmendments(+id);
   }
 
   @Post('contracts/:id/document')
@@ -228,6 +283,14 @@ export class SalesController {
     @Body('paidAmount') paidAmount: number,
   ) {
     return this.service.payInstallment(+id, paidAmount);
+  }
+
+  @Post('installments/:id/remind')
+  sendInstallmentReminder(
+    @Param('id') id: string,
+    @Body() dto: SendInstallmentReminderDto,
+  ) {
+    return this.service.sendInstallmentReminder(+id, dto);
   }
 
   // --- Discounts ---

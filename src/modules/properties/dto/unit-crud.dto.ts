@@ -64,8 +64,12 @@ export class CreateUnitDto {
   @ApiPropertyOptional({ example: true, description: 'Featured unit flag (high visibility)' })
   isFeatured?: boolean;
 
+  @ApiPropertyOptional({ example: true, description: 'Price negotiable flag' })
+  isNegotiable?: boolean;
+
   @ApiPropertyOptional({ example: ['Premium', 'Penthouse', 'Corner'], description: 'List of tags for filtering' })
   inventoryTags?: string[];
+
 
   @ApiPropertyOptional({ example: 8500000.00, description: 'Active listing price' })
   currentPrice?: number;
@@ -129,6 +133,9 @@ export class UpdateUnitDto {
   @ApiPropertyOptional({ example: true })
   isFeatured?: boolean;
 
+  @ApiPropertyOptional({ example: true })
+  isNegotiable?: boolean;
+
   @ApiPropertyOptional({ example: ['Updated', 'Corner'] })
   inventoryTags?: string[];
 
@@ -140,6 +147,9 @@ export class UpdateUnitDto {
 
   @ApiPropertyOptional({ example: 'Updated remarks' })
   remarks?: string;
+
+  @ApiPropertyOptional({ example: 'Market price revision' })
+  priceChangeReason?: string;
 }
 
 export class UpdateUnitStatusDto {
@@ -216,3 +226,26 @@ export class CreatePromotionDto {
   @ApiPropertyOptional({ example: 'Active promotional campaigns', description: 'Remarks' })
   remarks?: string;
 }
+
+export class CreatePriceChangeRequestDto {
+  @ApiProperty({ example: 1, description: 'Unit ID' })
+  unitId: number;
+
+  @ApiProperty({ example: 3800000.00, description: 'Proposed base price in ETB' })
+  proposedPrice: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Whether the price is negotiable' })
+  isNegotiable?: boolean;
+
+  @ApiPropertyOptional({ example: 'ETB', default: 'ETB' })
+  currencyCode?: string;
+
+  @ApiProperty({ example: 'Client requested cash discount for upfront settlement', description: 'Reason for price change request' })
+  reason: string;
+}
+
+export class ReviewPriceChangeRequestDto {
+  @ApiPropertyOptional({ example: 'Approved as per seasonal discount policy', description: 'Review decision comment' })
+  comment?: string;
+}
+

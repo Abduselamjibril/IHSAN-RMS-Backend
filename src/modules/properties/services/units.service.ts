@@ -9,8 +9,10 @@ import { Property } from '../entities/property.entity';
 import { Building } from '../entities/building.entity';
 import { Floor } from '../entities/floor.entity';
 import { UnitPrice } from '../entities/unit-price.entity';
+import { UnitPriceHistory } from '../entities/unit-price-history.entity';
 import { PropertyMedia } from '../entities/property-media.entity';
 import { UnitImportLog } from '../entities/unit-import-log.entity';
+import { InventoryAuditLog } from '../entities/inventory-audit-log.entity';
 import { UnitTypesService } from './unit-types.service';
 import { CreateUnitDto, UpdateUnitDto, UpdateUnitStatusDto } from '../dto/unit-crud.dto';
 
@@ -35,10 +37,14 @@ export class UnitsService {
     private readonly floorRepo: Repository<Floor>,
     @InjectRepository(UnitPrice)
     private readonly unitPriceRepo: Repository<UnitPrice>,
+    @InjectRepository(UnitPriceHistory)
+    private readonly unitPriceHistoryRepo: Repository<UnitPriceHistory>,
     @InjectRepository(PropertyMedia)
     private readonly propertyMediaRepo: Repository<PropertyMedia>,
     @InjectRepository(UnitImportLog)
     private readonly logRepo: Repository<UnitImportLog>,
+    @InjectRepository(InventoryAuditLog)
+    private readonly auditLogRepo: Repository<InventoryAuditLog>,
 
     private readonly unitTypesService: UnitTypesService,
     private readonly dataSource: DataSource,
@@ -193,7 +199,7 @@ export class UnitsService {
     return { items, total };
   }
 
-  async findOneUnit(id: number): Promise<Unit & { pricingHistory: UnitPrice[]; statusHistory: UnitStatusHistory[]; media: PropertyMedia[] }> {
+  async findOneUnit(id: number): Promise<Unit & { pricingHistory: UnitPrice[]; priceHistory: UnitPriceHistory[]; statusHistory: UnitStatusHistory[]; media: PropertyMedia[] }> {
     const unit = await this.unitRepo.findOne({
       where: { id, isDeleted: false },
     });
@@ -204,6 +210,11 @@ export class UnitsService {
     const pricingHistory = await this.unitPriceRepo.find({
       where: { unit: { id } },
       order: { createdAt: 'DESC' },
+    });
+
+    const priceHistory = await this.unitPriceHistoryRepo.find({
+      where: [{ unit: { id } }],
+      order: { changedAt: 'DESC' },
     });
 
     const statusHistory = await this.unitStatusHistoryRepo.find({
@@ -220,14 +231,38 @@ export class UnitsService {
     return {
       ...unit,
       pricingHistory,
+      priceHistory,
       statusHistory,
       media,
     };
   }
 
-  async updateUnit(id: number, dto: UpdateUnitDto): Promise<Unit> {
+  async updateUnit(id: number, dto: UpdateUnitDto, changedBy = 'System'): Promise<Unit> {
     const unit = await this.unitRepo.findOne({ where: { id, isDeleted: false } });
     if (!unit) throw new NotFoundException(`Unit with ID ${id} not found.`);
+
+    // --- Audit Log: compare tracked fields ---
+    const auditFields = [
+      'unitNumber', 'unitCode', 'title', 'grossArea', 'netArea',
+      'areaSuperBuiltup', 'bedroomCount', 'bathroomCount', 'currentPrice',
+      'balconyArea', 'facing', 'aspect', 'view', 'description', 'remarks',
+    ];
+    const auditEntries: Partial<InventoryAuditLog>[] = [];
+    for (const field of auditFields) {
+      if (dto[field] !== undefined) {
+        const oldVal = (unit as any)[field];
+        const newVal = dto[field];
+        if (String(oldVal ?? '') !== String(newVal ?? '')) {
+          auditEntries.push({
+            unit: { id } as any,
+            fieldName: field,
+            oldValue: oldVal != null ? String(oldVal) : null,
+            newValue: newVal != null ? String(newVal) : null,
+            changedBy,
+          });
+        }
+      }
+    }
 
     if (dto.unitTypeName) {
       unit.unitType = await this.unitTypesService.findOrCreateByName(dto.unitTypeName);
@@ -243,8 +278,46 @@ export class UnitsService {
       unit.unitStatus = status;
     }
 
+    const oldPrice = unit.currentPrice ? Number(unit.currentPrice) : 0;
+    const priceChanged = dto.currentPrice !== undefined && Number(dto.currentPrice) !== oldPrice;
+
     Object.assign(unit, dto);
-    return this.unitRepo.save(unit);
+    const saved = await this.unitRepo.save(unit);
+
+    // If price changed, persist to UnitPrice and UnitPriceHistory
+    if (priceChanged && dto.currentPrice != null) {
+      const newPriceVal = Number(dto.currentPrice);
+      const unitPrice = this.unitPriceRepo.create({
+        unit: saved,
+        basePrice: newPriceVal,
+        finalPrice: newPriceVal,
+        currencyCode: dto.currencyCode || saved.currencyCode || 'ETB',
+        isNegotiable: !!saved.isNegotiable,
+        effectiveFrom: new Date(),
+        isActive: true,
+        remarks: dto.priceChangeReason || dto.remarks || 'Updated via unit profile edit',
+      });
+      const savedUnitPrice = await this.unitPriceRepo.save(unitPrice);
+
+      const history = this.unitPriceHistoryRepo.create({
+        unit: saved,
+        unitPrice: savedUnitPrice,
+        oldPrice,
+        newPrice: newPriceVal,
+        currencyCode: dto.currencyCode || saved.currencyCode || 'ETB',
+        isNegotiable: !!saved.isNegotiable,
+        changeReason: dto.priceChangeReason || dto.remarks || 'Updated via unit profile edit',
+        changedByName: changedBy,
+      });
+      await this.unitPriceHistoryRepo.save(history);
+    }
+
+    // Persist audit entries
+    if (auditEntries.length > 0) {
+      await this.auditLogRepo.save(auditEntries);
+    }
+
+    return saved;
   }
 
   async removeUnit(id: number): Promise<void> {
@@ -276,7 +349,7 @@ export class UnitsService {
 
   // --- Dynamic Status Transition Workflow ---
 
-  async transitionStatus(id: number, dto: UpdateUnitStatusDto): Promise<Unit> {
+  async transitionStatus(id: number, dto: UpdateUnitStatusDto, userId = 1, username = 'System'): Promise<Unit> {
     const unit = await this.unitRepo.findOne({ where: { id, isDeleted: false } });
     if (!unit) throw new NotFoundException(`Unit with ID ${id} not found.`);
 
@@ -299,7 +372,7 @@ export class UnitsService {
     if (oldStatus.statusName === 'Sold' && newStatus.statusName !== 'Sold') {
       // Reverting a sold unit requires manager bypass confirmation or explicit reason
       if (!dto.reason || !dto.reason.toLowerCase().includes('approved')) {
-        throw new BadRequestException('Reverting a sold unit requires approval reason.');
+        throw new BadRequestException('A Sold unit cannot be reverted to Available without approval. Please include "approved" in your reason to confirm this action.');
       }
     }
 
@@ -320,16 +393,25 @@ export class UnitsService {
     unit.unitStatus = newStatus;
     const saved = await this.unitRepo.save(unit);
 
-    // Save history
+    // Save history with user context
     const history = this.unitStatusHistoryRepo.create({
       unit: saved,
       oldStatus,
       newStatus,
       reason: dto.reason || 'Status transitioned via API request',
+      changedBy: userId,
+      changedByName: username,
     });
     await this.unitStatusHistoryRepo.save(history);
 
     return saved;
+  }
+
+  async getUnitAuditLog(unitId: number): Promise<InventoryAuditLog[]> {
+    return this.auditLogRepo.find({
+      where: { unit: { id: unitId } },
+      order: { changedAt: 'DESC' },
+    });
   }
 
   async getStatusHistory(): Promise<UnitStatusHistory[]> {

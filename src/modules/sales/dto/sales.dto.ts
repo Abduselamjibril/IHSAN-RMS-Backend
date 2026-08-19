@@ -253,3 +253,100 @@ export class CreateCommissionDto {
   @ApiProperty({ example: 100000 })
   commissionAmount: number;
 }
+
+export class EmailQuotationDto {
+  @ApiProperty({ example: 'customer@example.com' })
+  recipientEmail: string;
+
+  @ApiPropertyOptional({ example: '+251911223344' })
+  recipientPhone?: string;
+
+  @ApiPropertyOptional({ example: 'Your Official Quotation from IHSAN Real Estate' })
+  subject?: string;
+
+  @ApiPropertyOptional({ example: 'Please find attached the official price quote.' })
+  message?: string;
+}
+
+export class ConvertReservationDto {
+  @ApiPropertyOptional({ example: 1 })
+  quotationId?: number;
+
+  @ApiPropertyOptional({ example: 100000 })
+  bookingAmount?: number;
+
+  @ApiPropertyOptional({ example: 'Converted from active reservation' })
+  remarks?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  createdById?: number;
+}
+
+export class RejectBookingDto {
+  @ApiProperty({ example: 'Incomplete documentation or unverified source of funds' })
+  rejectionReason: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  reviewerId?: number;
+}
+
+export class FinanceReviewBookingDto {
+  @ApiProperty({ example: 'APPROVE' })
+  action: 'APPROVE' | 'REJECT';
+
+  @ApiPropertyOptional({ example: 'Bank deposit receipt confirmed on slip #ETB-883921' })
+  comment?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  financeOfficerId?: number;
+}
+
+export class CancelBookingDto {
+  @ApiProperty({ example: 'Client decided not to proceed with the purchase' })
+  cancellationReason: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  cancelledById?: number;
+}
+
+export class UpdateAgreementVersionDto {
+  @ApiPropertyOptional({ example: 'Updated clause following buyer agreement amendment' })
+  changeRemarks?: string;
+
+  @ApiPropertyOptional({ example: 'Customized contract clauses' })
+  agreementDocument?: string;
+}
+
+export class UpdateContractStatusDto {
+  @ApiProperty({ example: 'UNDER_REVIEW' })
+  status: string;
+
+  @ApiPropertyOptional({ example: 'Contract verified by legal counsel' })
+  remarks?: string;
+}
+
+export class CreateContractAmendmentDto {
+  @ApiProperty({ example: 'PRICE_ADJUSTMENT' })
+  amendmentType: string;
+
+  @ApiProperty({ example: 'Adjusted total valuation' })
+  amendmentDescription: string;
+
+  @ApiPropertyOptional({ example: 4200000 })
+  adjustedAmount?: number;
+
+  @ApiPropertyOptional({ example: '2026-09-01' })
+  effectiveDate?: Date;
+
+  @ApiPropertyOptional({ example: 'Approved by management' })
+  remarks?: string;
+}
+
+export class SendInstallmentReminderDto {
+  @ApiPropertyOptional({ example: 'EMAIL_TELEGRAM' })
+  channelCode?: string;
+
+  @ApiPropertyOptional({ example: 'Kindly settle your upcoming installment at your earliest convenience.' })
+  customNote?: string;
+}
+

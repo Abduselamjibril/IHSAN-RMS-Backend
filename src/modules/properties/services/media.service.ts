@@ -112,4 +112,47 @@ export class MediaService {
     } as any);
     return this.floorPlanRepo.save(plan as any);
   }
+
+  // --- Media Management Methods ---
+
+  async deleteMedia(mediaId: number): Promise<{ success: boolean }> {
+    const media = await this.mediaRepo.findOne({ where: { id: mediaId } });
+    if (!media) throw new NotFoundException(`Media with ID ${mediaId} not found.`);
+    await this.mediaRepo.remove(media);
+    return { success: true };
+  }
+
+  async deleteDocument(docId: number): Promise<{ success: boolean }> {
+    const doc = await this.documentRepo.findOne({ where: { id: docId } });
+    if (!doc) throw new NotFoundException(`Document with ID ${docId} not found.`);
+    await this.documentRepo.remove(doc);
+    return { success: true };
+  }
+
+  async setFeaturedMedia(propertyId: number, mediaId: number): Promise<PropertyMedia> {
+    // Unset all other featured flags for this property
+    await this.mediaRepo.update(
+      { property: { id: propertyId } },
+      { isFeatured: false },
+    );
+    // Set the selected media as featured
+    const media = await this.mediaRepo.findOne({ where: { id: mediaId } });
+    if (!media) throw new NotFoundException(`Media with ID ${mediaId} not found.`);
+    media.isFeatured = true;
+    return this.mediaRepo.save(media);
+  }
+
+  async updateMediaOrder(
+    propertyId: number,
+    orders: { id: number; displayOrder: number }[],
+  ): Promise<{ success: boolean }> {
+    if (!orders || orders.length === 0) return { success: true };
+    for (const entry of orders) {
+      await this.mediaRepo.update(
+        { id: entry.id, property: { id: propertyId } },
+        { displayOrder: entry.displayOrder },
+      );
+    }
+    return { success: true };
+  }
 }

@@ -225,7 +225,11 @@ export class TelegramService implements OnModuleInit {
         }
       }
 
-      await this.client.sendMessage(recipient, { message });
+      const finalMessage = message && message.length > 4000 
+        ? message.substring(0, 3990) + '...' 
+        : message;
+
+      await this.client.sendMessage(recipient, { message: finalMessage });
       this.logger.log(`Telegram DM successfully sent to: ${recipient}`);
       return true;
     } catch (error) {

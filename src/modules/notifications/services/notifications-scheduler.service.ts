@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { InstallmentSchedule } from '../../sales/entities/installment-schedule.entity';
 import { SalesReservation } from '../../sales/entities/sales-reservation.entity';
 import { FollowupReminder } from '../../crm/entities/followup-reminder.entity';
@@ -29,6 +29,7 @@ export class NotificationsSchedulerService implements OnModuleInit {
     private readonly unitStatusHistoryRepo: Repository<UnitStatusHistory>,
 
     private readonly notificationsService: NotificationsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   onModuleInit() {
@@ -186,33 +187,47 @@ export class NotificationsSchedulerService implements OnModuleInit {
           });
         }
       } else {
-        // Expired!
-        res.status = 'EXPIRED';
-        await this.reservationRepo.save(res);
+        // Expired! — Wrap status change in a transaction for safe retryability
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+        try {
+          res.status = 'EXPIRED';
+          await queryRunner.manager.save(res);
 
-        // Auto release unit in inventory
-        if (res.unit && availableStatus) {
-          const unit = await this.unitRepo.findOne({
-            where: { id: res.unit.id },
-            relations: { unitStatus: true },
-          });
+          // Auto release unit in inventory
+          if (res.unit && availableStatus) {
+            const unit = await queryRunner.manager.findOne(Unit, {
+              where: { id: res.unit.id },
+              relations: { unitStatus: true },
+            });
 
-          if (unit && unit.unitStatus.statusName === 'Reserved') {
-            const oldStatus = unit.unitStatus;
-            unit.unitStatus = availableStatus;
-            unit.reservationExpiry = null;
-            await this.unitRepo.save(unit);
+            if (unit && unit.unitStatus.statusName === 'Reserved') {
+              const oldStatus = unit.unitStatus;
+              unit.unitStatus = availableStatus;
+              unit.reservationExpiry = null;
+              await queryRunner.manager.save(unit);
 
-            // Log unit status history log
-            await this.unitStatusHistoryRepo.save(
-              this.unitStatusHistoryRepo.create({
-                unit,
-                oldStatus,
-                newStatus: availableStatus,
-                reason: `Reservation expired ref: ${resNo}`,
-              })
-            );
+              // Log unit status history log
+              await queryRunner.manager.save(
+                this.unitStatusHistoryRepo.create({
+                  unit,
+                  oldStatus,
+                  newStatus: availableStatus,
+                  reason: `Reservation expired ref: ${resNo}`,
+                  changedByName: 'System (Auto-Expiry)',
+                })
+              );
+            }
           }
+
+          await queryRunner.commitTransaction();
+        } catch (txErr) {
+          await queryRunner.rollbackTransaction();
+          this.logger.error(`Failed to expire reservation ${resNo}:`, txErr);
+          continue; // Skip to next reservation; this one will be retried next cycle
+        } finally {
+          await queryRunner.release();
         }
 
         // Notify Customer, Sales Rep, and Manager

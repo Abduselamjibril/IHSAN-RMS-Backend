@@ -20,6 +20,8 @@ import { Site } from './entities/site.entity';
 import { AmenityMaster } from './entities/amenity-master.entity';
 import { PropertyAmenity } from './entities/property-amenity.entity';
 import { UnitImportLog } from './entities/unit-import-log.entity';
+import { InventoryAuditLog } from './entities/inventory-audit-log.entity';
+import { PriceChangeRequest } from './entities/price-change-request.entity';
 
 // Controllers
 import { PropertyTypesController } from './controllers/property-types.controller';
@@ -66,6 +68,8 @@ import { DashboardService } from './services/dashboard.service';
       AmenityMaster,
       PropertyAmenity,
       UnitImportLog,
+      InventoryAuditLog,
+      PriceChangeRequest,
     ]),
   ],
   controllers: [

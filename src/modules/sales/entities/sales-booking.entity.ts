@@ -51,8 +51,35 @@ export class SalesBooking {
   @Column({ name: 'booking_amount', type: 'numeric', precision: 18, scale: 2, nullable: true })
   bookingAmount: number;
 
-  @Column({ type: 'varchar', length: 30, nullable: true })
-  status: string; // PENDING, APPROVED, CANCELLED, CONTRACT_CREATED
+  @Column({ type: 'varchar', length: 30, nullable: true, default: 'PENDING_SALES' })
+  status: string; // PENDING_SALES, PENDING_FINANCE, APPROVED, REJECTED, CANCELLED, CONTRACT_CREATED
+
+  @Column({ name: 'approval_stage', type: 'varchar', length: 50, nullable: true, default: 'PENDING_SALES' })
+  approvalStage: string;
+
+  @Column({ name: 'sales_approved_by', type: 'bigint', nullable: true })
+  salesApprovedBy: number;
+
+  @Column({ name: 'sales_approved_at', type: 'timestamp', nullable: true })
+  salesApprovedAt: Date;
+
+  @Column({ name: 'finance_approved_by', type: 'bigint', nullable: true })
+  financeApprovedBy: number;
+
+  @Column({ name: 'finance_approved_at', type: 'timestamp', nullable: true })
+  financeApprovedAt: Date;
+
+  @Column({ name: 'finance_comment', type: 'text', nullable: true })
+  financeComment: string;
+
+  @Column({ name: 'rejection_reason', type: 'text', nullable: true })
+  rejectionReason: string;
+
+  @Column({ name: 'cancellation_reason', type: 'text', nullable: true })
+  cancellationReason: string;
+
+  @Column({ type: 'text', nullable: true })
+  remarks: string;
 
   @Column({ name: 'approved_by', type: 'bigint', nullable: true })
   approvedBy: number;

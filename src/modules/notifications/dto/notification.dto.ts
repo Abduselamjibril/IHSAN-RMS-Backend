@@ -7,6 +7,10 @@ export class SendNotificationDto {
 
   @IsString()
   @IsOptional()
+  channelCode?: string; // 'EMAIL', 'TELEGRAM', 'INAPP'
+
+  @IsString()
+  @IsOptional()
   templateCode?: string;
 
   @IsString()
