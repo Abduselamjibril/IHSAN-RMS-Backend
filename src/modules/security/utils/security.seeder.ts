@@ -100,28 +100,40 @@ export class SecuritySeeder {
       const role = roleEntities[roleCode];
       if (!role) return;
       const existing = await this.rolePermRepo.find({ where: { roleId: role.roleId } });
-      const existingIds = new Set(existing.map((e) => e.permissionId));
+      const existingMap = new Map(existing.map((e) => [e.permissionId, e]));
       const toSave: RolePermission[] = [];
 
       for (const p of allPermissions) {
-        if (filterFn(p.permissionCode) && !existingIds.has(p.permissionId)) {
-          toSave.push(
-            this.rolePermRepo.create({
-              roleId: role.roleId,
-              permissionId: p.permissionId,
-              canView: capabilities.canView ?? true,
-              canCreate: capabilities.canCreate ?? false,
-              canEdit: capabilities.canEdit ?? false,
-              canDelete: capabilities.canDelete ?? false,
-              canApprove: capabilities.canApprove ?? false,
-              canExport: capabilities.canExport ?? false,
-            }),
-          );
+        if (filterFn(p.permissionCode)) {
+          const existingItem = existingMap.get(p.permissionId);
+          if (!existingItem) {
+            toSave.push(
+              this.rolePermRepo.create({
+                roleId: role.roleId,
+                permissionId: p.permissionId,
+                canView: capabilities.canView ?? true,
+                canCreate: capabilities.canCreate ?? false,
+                canEdit: capabilities.canEdit ?? false,
+                canDelete: capabilities.canDelete ?? false,
+                canApprove: capabilities.canApprove ?? false,
+                canExport: capabilities.canExport ?? false,
+              }),
+            );
+          } else {
+            // Update capabilities if needed
+            existingItem.canView = capabilities.canView ?? existingItem.canView;
+            existingItem.canCreate = capabilities.canCreate ?? existingItem.canCreate;
+            existingItem.canEdit = capabilities.canEdit ?? existingItem.canEdit;
+            existingItem.canDelete = capabilities.canDelete ?? existingItem.canDelete;
+            existingItem.canApprove = capabilities.canApprove ?? existingItem.canApprove;
+            existingItem.canExport = capabilities.canExport ?? existingItem.canExport;
+            toSave.push(existingItem);
+          }
         }
       }
       if (toSave.length > 0) {
         await this.rolePermRepo.save(toSave);
-        this.logger.log(`Assigned ${toSave.length} permissions to role: ${roleCode}`);
+        this.logger.log(`Assigned/Updated ${toSave.length} permissions for role: ${roleCode}`);
       }
     };
 
@@ -130,65 +142,146 @@ export class SecuritySeeder {
       canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true,
     });
 
-    // INV_MGR (Inventory Manager): full Property & Unit & Approvals
-    await assignRolePermissions('INV_MGR', (code) => code.startsWith('property.'), {
-      canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true,
-    });
+    // SALES_MGR (Sales Manager): full Sales, CRM, Property views, Broker & Reports
+    await assignRolePermissions(
+      'SALES_MGR',
+      (code) => code.startsWith('sales.') || code.startsWith('crm.') || code.startsWith('property.') || code.startsWith('broker.') || code.startsWith('finance.balances.') || code.startsWith('finance.reports.'),
+      { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: true, canExport: true }
+    );
 
-    // SALES_MGR (Sales Manager): view inventory, submit/approve price changes, promotions
-    await assignRolePermissions('SALES_MGR', (code) => code.startsWith('property.'), {
-      canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: true, canExport: true,
-    });
+    // SALES_OFFICER (Sales Officer / Executive): Quotations, Bookings, Discount Requests, View units & contracts
+    await assignRolePermissions(
+      'SALES_OFFICER',
+      (code) =>
+        code.startsWith('sales.quotations.') ||
+        code === 'sales.bookings.create' ||
+        code === 'sales.bookings.read_all' ||
+        code === 'sales.discounts.request' ||
+        code === 'sales.discounts.read_all' ||
+        code === 'sales.contracts.read_all' ||
+        code.startsWith('sales.installments.') ||
+        code.startsWith('crm.') ||
+        code.startsWith('property.units.') ||
+        code.startsWith('property.properties.') ||
+        code.startsWith('property.pricing.change_requests'),
+      { canView: true, canCreate: true, canEdit: false, canDelete: false, canApprove: false, canExport: true }
+    );
 
-    // SALES_OFFICER (Sales Executive): view units, submit price change requests (canCreate: true, canApprove: false)
-    await assignRolePermissions('SALES_OFFICER', (code) => code.startsWith('property.units.') || code.startsWith('property.pricing.change_requests') || code.startsWith('property.properties.'), {
-      canView: true, canCreate: true, canEdit: false, canDelete: false, canApprove: false, canExport: true,
-    });
+    // FINANCE_MGR (Finance Manager): full Finance, Commission Approvals, Payment Reversals/Adjustments, Booking Finance Approvals
+    await assignRolePermissions(
+      'FINANCE_MGR',
+      (code) =>
+        code.startsWith('finance.') ||
+        code.startsWith('sales.commissions.') ||
+        code === 'sales.bookings.finance_review' ||
+        code.startsWith('sales.contracts.') ||
+        code.startsWith('sales.installments.') ||
+        code.startsWith('property.'),
+      { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true }
+    );
 
-    // EXEC (Executive Management): view and export everything
+    // FINANCE_OFFICER (Finance Officer): Collections, Payments, Receipts, Due-Date Reminders, Statements, Aging
+    await assignRolePermissions(
+      'FINANCE_OFFICER',
+      (code) =>
+        code.startsWith('finance.payments.') ||
+        code.startsWith('finance.receipts.') ||
+        code.startsWith('finance.balances.') ||
+        code.startsWith('finance.statements.') ||
+        code.startsWith('finance.reminders.') ||
+        code.startsWith('finance.reports.') ||
+        code === 'sales.bookings.finance_review' ||
+        code === 'sales.commissions.read_all' ||
+        code.startsWith('sales.installments.'),
+      { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false, canExport: true }
+    );
+
+    // INV_MGR (Inventory Manager): full Property & Unit Inventory & Price Approvals
+    await assignRolePermissions(
+      'INV_MGR',
+      (code) => code.startsWith('property.') || code === 'sales.contracts.read_all' || code === 'sales.quotations.read_all',
+      { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true }
+    );
+
+    // BRK_MGR (Broker Manager): Broker & Commissions
+    await assignRolePermissions(
+      'BRK_MGR',
+      (code) => code.startsWith('broker.') || code.startsWith('sales.commissions.') || code.startsWith('sales.contracts.read_all'),
+      { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: true, canExport: true }
+    );
+
+    // MKT_MGR (Marketing Manager): Marketing & CRM Leads
+    await assignRolePermissions(
+      'MKT_MGR',
+      (code) => code.startsWith('marketing.') || code.startsWith('crm.'),
+      { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false, canExport: true }
+    );
+
+    // EXEC (Executive Management): View and export all modules
     await assignRolePermissions('EXEC', () => true, {
       canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canExport: true,
     });
 
-    // 4. Seed Default Admin User
-    let adminUser = await this.userRepo.findOne({ where: { username: 'admin' } });
-    const finalPassword = process.env.ADMIN_PASSWORD || 'Admin@123';
+    // 4. Seed Standard Default Users
+    const seedUsers = [
+      { emp: 'EMP-0001', username: 'admin', first: 'System', last: 'Administrator', email: 'admin@ihsanrems.com', role: 'SYS_ADMIN' },
+      { emp: 'EMP-0002', username: 'sales.manager', first: 'Abebe', last: 'SalesMgr', email: 'sales.mgr@ihsanrems.com', role: 'SALES_MGR' },
+      { emp: 'EMP-0003', username: 'sales.officer', first: 'Dawit', last: 'SalesOfficer', email: 'sales.officer@ihsanrems.com', role: 'SALES_OFFICER' },
+      { emp: 'EMP-0004', username: 'finance.manager', first: 'Hanan', last: 'FinanceMgr', email: 'finance.mgr@ihsanrems.com', role: 'FINANCE_MGR' },
+      { emp: 'EMP-0005', username: 'finance.officer', first: 'Yonas', last: 'FinanceOfficer', email: 'finance.officer@ihsanrems.com', role: 'FINANCE_OFFICER' },
+      { emp: 'EMP-0006', username: 'inventory.manager', first: 'Solomon', last: 'InvMgr', email: 'inv.mgr@ihsanrems.com', role: 'INV_MGR' },
+      { emp: 'EMP-0007', username: 'broker.manager', first: 'Elias', last: 'BrokerMgr', email: 'broker.mgr@ihsanrems.com', role: 'BRK_MGR' },
+      { emp: 'EMP-0008', username: 'marketing.manager', first: 'Sara', last: 'MarketingMgr', email: 'mkt.mgr@ihsanrems.com', role: 'MKT_MGR' },
+      { emp: 'EMP-0009', username: 'executive', first: 'Almaz', last: 'Executive', email: 'exec@ihsanrems.com', role: 'EXEC' },
+    ];
 
-    if (!adminUser) {
-      adminUser = this.userRepo.create({
-        employeeCode: 'EMP-0001',
-        username: 'admin',
-        firstName: 'System',
-        lastName: 'Administrator',
-        emailAddress: 'admin@ihsanrems.com',
-        phoneNumber: '+251911000000',
-        passwordHash: hashPassword(finalPassword),
-        isActive: true,
-        isLocked: false,
-        forcePasswordChange: false,
-        createdBy: 'SEEDER',
-      });
-      adminUser = await this.userRepo.save(adminUser);
-      this.logger.log('Created default admin user (username: admin).');
-    } else {
-      adminUser.passwordHash = hashPassword(finalPassword);
-      adminUser.isLocked = false;
-      adminUser.isActive = true;
-      adminUser.forcePasswordChange = false;
-      await this.userRepo.save(adminUser);
-      this.logger.log('Reset admin user password and unlocked account.');
+    const defaultPassword = process.env.ADMIN_PASSWORD || 'Admin@123';
+
+    for (const u of seedUsers) {
+      let userEntity = await this.userRepo.findOne({ where: { username: u.username } });
+      if (!userEntity) {
+        userEntity = this.userRepo.create({
+          employeeCode: u.emp,
+          username: u.username,
+          firstName: u.first,
+          lastName: u.last,
+          emailAddress: u.email,
+          phoneNumber: '+251911000000',
+          passwordHash: hashPassword(defaultPassword),
+          isActive: true,
+          isLocked: false,
+          forcePasswordChange: false,
+          createdBy: 'SEEDER',
+        });
+        userEntity = await this.userRepo.save(userEntity);
+        this.logger.log(`Created default user: ${u.username}`);
+      } else {
+        userEntity.passwordHash = hashPassword(defaultPassword);
+        userEntity.isLocked = false;
+        userEntity.isActive = true;
+        userEntity.forcePasswordChange = false;
+        await this.userRepo.save(userEntity);
+      }
+
+      // Link User to Role
+      const role = roleEntities[u.role];
+      if (role) {
+        let existingUserRole = await this.userRoleRepo.findOne({
+          where: { userId: userEntity.userId, roleId: role.roleId },
+        });
+        if (!existingUserRole) {
+          existingUserRole = this.userRoleRepo.create({
+            userId: userEntity.userId,
+            roleId: role.roleId,
+            effectiveFromDate: new Date(),
+            isActive: true,
+          });
+          await this.userRoleRepo.save(existingUserRole);
+          this.logger.log(`Linked user ${u.username} to role ${u.role}`);
+        }
+      }
     }
 
-      // Link User to SYS_ADMIN Role
-      const userRoleRelation = this.userRoleRepo.create({
-        userId: adminUser.userId,
-        roleId: roleEntities['SYS_ADMIN'].roleId,
-        effectiveFromDate: new Date(),
-        isActive: true,
-      });
-      await this.userRoleRepo.save(userRoleRelation);
-      this.logger.log('Linked default admin user to System Administrator role.');
-
-    this.logger.log('Security database seeding completed.');
+    this.logger.log('Security database seeding completed successfully.');
   }
 }
