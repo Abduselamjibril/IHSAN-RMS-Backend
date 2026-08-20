@@ -157,3 +157,13 @@ export class CreateReminderConfigDto {
   @IsBoolean()
   isActive?: boolean;
 }
+
+export class AdjustPaymentDto {
+  @IsNotEmpty()
+  @IsNumber()
+  adjustedAmount: number;
+
+  @IsNotEmpty()
+  @IsString()
+  adjustmentReason: string;
+}

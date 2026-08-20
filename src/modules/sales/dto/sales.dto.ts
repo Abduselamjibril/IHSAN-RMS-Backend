@@ -350,3 +350,39 @@ export class SendInstallmentReminderDto {
   customNote?: string;
 }
 
+export class ReviewDiscountRequestDto {
+  @ApiProperty({ example: 'APPROVE' })
+  action: 'APPROVE' | 'REJECT';
+
+  @ApiPropertyOptional({ example: 'Approved by Sales Director per special volume agreement' })
+  comment?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  approverId?: number;
+}
+
+export class ReviewCommissionDto {
+  @ApiProperty({ example: 'APPROVE' })
+  action: 'APPROVE' | 'REJECT';
+
+  @ApiPropertyOptional({ example: 'Verified contract execution and 100% down payment deposit verified' })
+  remarks?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  reviewerId?: number;
+}
+
+export class CommissionsFilterDto {
+  @ApiPropertyOptional({ example: 1 })
+  agentId?: number;
+
+  @ApiPropertyOptional({ example: '2026-01-01' })
+  startDate?: string;
+
+  @ApiPropertyOptional({ example: '2026-12-31' })
+  endDate?: string;
+
+  @ApiPropertyOptional({ example: 'PENDING' })
+  status?: string;
+}
+

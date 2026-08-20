@@ -28,6 +28,9 @@ export class CustomerBalance {
   @Column({ name: 'outstanding_balance', type: 'numeric', precision: 18, scale: 2, nullable: true })
   outstandingBalance: number;
 
+  @Column({ name: 'advance_credit_balance', type: 'numeric', precision: 18, scale: 2, default: 0 })
+  advanceCreditBalance: number;
+
   @Column({ name: 'last_updated', type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
   lastUpdated: Date;
 }

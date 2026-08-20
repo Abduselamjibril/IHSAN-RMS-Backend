@@ -9,6 +9,7 @@ import {
   CreatePenaltyConfigDto,
   WaivePenaltyDto,
   CreateReminderConfigDto,
+  AdjustPaymentDto,
 } from '../dto/finance.dto';
 
 @ApiTags('Payment & Financial Management')
@@ -43,6 +44,11 @@ export class FinanceController {
     return this.service.getPayment(+id);
   }
 
+  @Get('payments/:id/history')
+  getPaymentHistory(@Param('id') id: string) {
+    return this.service.getPaymentHistory(+id);
+  }
+
   @Put('payments/:id/approve')
   approvePayment(@Param('id') id: string, @Body() dto: ApprovePaymentDto) {
     return this.service.approvePayment(+id, 1, dto); // Default User ID = 1
@@ -56,6 +62,11 @@ export class FinanceController {
   @Put('payments/:id/reverse')
   reversePayment(@Param('id') id: string, @Body('comment') comment: string) {
     return this.service.reversePayment(+id, 1, comment); // Default User ID = 1
+  }
+
+  @Put('payments/:id/adjust')
+  adjustPayment(@Param('id') id: string, @Body() dto: AdjustPaymentDto) {
+    return this.service.adjustPayment(+id, 1, dto); // Default User ID = 1
   }
 
   // --- Reschedule Installments ---
@@ -118,6 +129,16 @@ export class FinanceController {
   @Post('receipts/:id/reprint')
   reprintReceipt(@Param('id') id: string) {
     return this.service.reprintReceipt(+id);
+  }
+
+  @Post('receipts/:id/email')
+  emailReceipt(@Param('id') id: string, @Body('email') email?: string) {
+    return this.service.emailReceipt(+id, email);
+  }
+
+  @Get('receipts/verify/:receiptNumber')
+  verifyReceipt(@Param('receiptNumber') receiptNumber: string) {
+    return this.service.verifyReceipt(receiptNumber);
   }
 
   // --- Customer Outstanding Balances & Analytical Reports ---

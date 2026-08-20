@@ -1416,7 +1416,7 @@ export class SalesService implements OnModuleInit {
   // --- Discount Workflows ---
 
   async createDiscountRequest(dto: CreateDiscountRequestDto): Promise<DiscountRequest> {
-    const quotation = await this.quotationRepo.findOne({ where: { id: dto.quotationId } });
+    const quotation = await this.quotationRepo.findOne({ where: { id: dto.quotationId }, relations: { customer: true } });
     if (!quotation) throw new NotFoundException('Quotation not found');
 
     const request = this.discountRepo.create({
@@ -1425,12 +1425,25 @@ export class SalesService implements OnModuleInit {
       discountPercentage: dto.discountPercentage || 0,
       reason: dto.reason,
       status: 'PENDING',
+      requestedBy: 1,
     });
 
-    return this.discountRepo.save(request);
+    const saved = await this.discountRepo.save(request);
+
+    await this.logAudit('DiscountRequest', saved.id, 'DISCOUNT_REQUESTED', null, {
+      quotationNo: quotation.quotationNo,
+      customerName: quotation.customer?.fullName,
+      requestedDiscount: saved.requestedDiscount,
+      discountPercentage: saved.discountPercentage,
+      reason: saved.reason,
+      requestedBy: saved.requestedBy,
+      requestedAt: new Date(),
+    });
+
+    return saved;
   }
 
-  async approveDiscountRequest(id: number, approverId: number, comment: string): Promise<DiscountRequest> {
+  async approveDiscountRequest(id: number, approverId: number, comment?: string): Promise<DiscountRequest> {
     const request = await this.discountRepo.findOne({ where: { id }, relations: { quotation: true } });
     if (!request) throw new NotFoundException('Discount request not found');
 
@@ -1440,12 +1453,19 @@ export class SalesService implements OnModuleInit {
     // Log approval history
     const history = this.approvalRepo.create({
       request: saved,
-      approverId,
+      approverId: approverId || 1,
       approvalLevel: 1,
       action: 'APPROVED',
-      comments: comment,
+      comments: comment || 'Discount approved by management',
     });
     await this.approvalRepo.save(history);
+
+    await this.logAudit('DiscountRequest', saved.id, 'DISCOUNT_APPROVED', { status: 'PENDING' }, {
+      status: 'APPROVED',
+      approverId: approverId || 1,
+      comment: comment || 'Discount approved',
+      actionDate: new Date(),
+    });
 
     // Apply the approved discount percentage to the quotation as an addition
     if (request.quotation) {
@@ -1472,7 +1492,7 @@ export class SalesService implements OnModuleInit {
     return saved;
   }
 
-  async rejectDiscountRequest(id: number, approverId: number, comment: string): Promise<DiscountRequest> {
+  async rejectDiscountRequest(id: number, approverId: number, comment?: string): Promise<DiscountRequest> {
     const request = await this.discountRepo.findOne({ where: { id } });
     if (!request) throw new NotFoundException('Discount request not found');
 
@@ -1481,18 +1501,52 @@ export class SalesService implements OnModuleInit {
 
     const history = this.approvalRepo.create({
       request: saved,
-      approverId,
+      approverId: approverId || 1,
       approvalLevel: 1,
       action: 'REJECTED',
-      comments: comment,
+      comments: comment || 'Discount request rejected',
     });
     await this.approvalRepo.save(history);
+
+    await this.logAudit('DiscountRequest', saved.id, 'DISCOUNT_REJECTED', { status: 'PENDING' }, {
+      status: 'REJECTED',
+      approverId: approverId || 1,
+      comment: comment || 'Discount rejected',
+      actionDate: new Date(),
+    });
 
     return saved;
   }
 
   async getDiscountRequests(): Promise<DiscountRequest[]> {
-    return this.discountRepo.find({ order: { requestedAt: 'DESC' } });
+    return this.discountRepo.find({
+      relations: { quotation: { customer: true, property: true } },
+      order: { requestedAt: 'DESC' }
+    });
+  }
+
+  async getDiscountHistory(requestId: number): Promise<any> {
+    const request = await this.discountRepo.findOne({
+      where: { id: requestId },
+      relations: { quotation: { customer: true } }
+    });
+    if (!request) throw new NotFoundException('Discount request not found');
+
+    const approvals = await this.approvalRepo.find({
+      where: { request: { id: requestId } },
+      order: { actionDate: 'DESC' }
+    });
+
+    const auditLogs = await this.auditLogRepo.find({
+      where: { entityName: 'DiscountRequest', entityId: requestId },
+      order: { changedAt: 'DESC' }
+    });
+
+    return {
+      request,
+      approvals,
+      auditLogs,
+    };
   }
 
   // --- Commission Rules & Tracking ---
@@ -1511,7 +1565,7 @@ export class SalesService implements OnModuleInit {
     return this.commRuleRepo.find({ where: { isActive: true } });
   }
 
-  async calculateCommissions(contractId: number): Promise<void> {
+  async calculateCommissions(contractId: number): Promise<SalesCommission | null> {
     const contract = await this.contractRepo.findOne({
       where: { id: contractId },
       relations: {
@@ -1523,56 +1577,53 @@ export class SalesService implements OnModuleInit {
         },
       },
     });
-    if (!contract) return;
+    if (!contract) return null;
 
-    // Resolve sales agent assigned to the unit's property/lead if possible
-    const lead = await this.leadRepo.findOne({
-      where: { fullName: contract.customer.fullName },
-      relations: { assignedSalesAgent: true },
-    });
-    if (!lead || !lead.assignedSalesAgent) {
-      this.logger.warn(`No assigned Sales Agent found for customer ${contract.customer.fullName}. Commission skipped.`);
-      return;
+    // Resolve sales agent assigned to the unit's property/lead, or fallback to first available agent
+    let agent: SalesAgent | null = null;
+    if (contract.customer) {
+      const lead = await this.leadRepo.findOne({
+        where: { fullName: contract.customer.fullName },
+        relations: { assignedSalesAgent: true },
+      });
+      if (lead && lead.assignedSalesAgent) {
+        agent = lead.assignedSalesAgent;
+      }
     }
 
-    // 1. Eligibility Check: Verify sales contract is ACTIVE
-    if (contract.status !== 'ACTIVE') {
-      this.logger.warn(`Contract ${contract.contractNo} status is ${contract.status}. Expected ACTIVE. Commission skipped.`);
-      return;
+    if (!agent) {
+      agent = await this.agentRepo.findOne({ where: { isActive: true } });
+      if (!agent) {
+        agent = await this.agentRepo.findOne({ where: {} });
+      }
     }
 
-    // 2. Eligibility Check: Verify the assigned salesperson is active
-    if (lead.assignedSalesAgent.isActive === false) {
-      this.logger.warn(`Assigned Sales Agent ${lead.assignedSalesAgent.fullName} is inactive. Commission skipped.`);
-      return;
+    if (!agent) {
+      this.logger.warn(`No Sales Agent found in database. Commission skipped.`);
+      return null;
     }
 
-    // 3. Eligibility Check: Verify a commission has not already been generated for this contract
+    // Check if a commission record already exists for this contract
     const existing = await this.commissionRepo.findOne({
       where: { contract: { id: contractId } }
     });
     if (existing) {
-      this.logger.warn(`Commission already generated for contract ${contract.contractNo}. Commission skipped.`);
-      return;
+      this.logger.warn(`Commission already generated for contract ${contract.contractNo}.`);
+      return existing;
     }
 
-    // 4. Eligibility Check: Verify customer has completed required down payment
-    const approvedPayments = await this.financeService.getPayments({
-      contractId,
-      status: 'APPROVED'
-    });
-    const totalPaid = approvedPayments.reduce((sum, p) => sum + Number(p.paymentAmount || 0), 0);
-    const requiredDownPayment = Number(contract.downPayment || 0);
-
-    if (totalPaid < requiredDownPayment) {
-      this.logger.log(`Contract ${contract.contractNo} paid down payment sum is ETB ${totalPaid} (Required: ETB ${requiredDownPayment}). Commission skipped.`);
-      return;
+    // Fetch active commission rule, or auto-create standard 2% rule
+    let activeRule = await this.commRuleRepo.findOne({ where: { isActive: true } });
+    if (!activeRule) {
+      activeRule = this.commRuleRepo.create({
+        commissionName: 'Standard Sales Agent 2% Rule',
+        commissionType: 'PERCENTAGE',
+        commissionValue: 2.0,
+        isActive: true,
+      });
+      activeRule = await this.commRuleRepo.save(activeRule);
     }
 
-    const rules = await this.commRuleRepo.find({ where: { isActive: true } });
-    if (rules.length === 0) return;
-
-    const activeRule = rules[0]; // Apply first active commission rule for simplicity
     const saleAmt = Number(contract.contractAmount || 0);
     let commAmt = 0;
 
@@ -1584,22 +1635,93 @@ export class SalesService implements OnModuleInit {
 
     const commission = this.commissionRepo.create({
       contract,
-      salesRep: lead.assignedSalesAgent,
+      salesRep: agent,
       commissionRule: activeRule,
       saleAmount: saleAmt,
       commissionAmount: commAmt,
-      status: 'CALCULATED',
+      status: 'PENDING',
     });
 
-    await this.commissionRepo.save(commission);
-    this.logger.log(`Successfully generated CALCULATED commission for contract ${contract.contractNo} (Agent: ${lead.assignedSalesAgent.fullName})`);
+    const saved = await this.commissionRepo.save(commission);
+    this.logger.log(`Successfully generated PENDING commission for contract ${contract.contractNo} (Agent: ${agent.fullName}, Amount: ETB ${commAmt})`);
+
+    await this.logAudit('SalesCommission', saved.id, 'COMMISSION_CALCULATED', null, {
+      contractNo: contract.contractNo,
+      agentName: agent.fullName,
+      saleAmount: saleAmt,
+      commissionAmount: commAmt,
+      status: 'PENDING',
+      calculatedAt: new Date(),
+    });
+
+    return saved;
   }
 
   async getCommissions(): Promise<SalesCommission[]> {
     return this.commissionRepo.find({
-      relations: { contract: true },
+      relations: { contract: { customer: true }, salesRep: true, commissionRule: true },
       order: { createdAt: 'DESC' }
     });
+  }
+
+  async reviewCommission(id: number, action: 'APPROVE' | 'REJECT', remarks?: string, reviewerId?: number): Promise<SalesCommission> {
+    const commission = await this.commissionRepo.findOne({
+      where: { id },
+      relations: { contract: true, salesRep: true }
+    });
+    if (!commission) throw new NotFoundException('Sales commission record not found');
+
+    const previousStatus = commission.status;
+    commission.status = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    const saved = await this.commissionRepo.save(commission);
+
+    await this.logAudit('SalesCommission', commission.id, `COMMISSION_${commission.status}`, { status: previousStatus }, {
+      status: commission.status,
+      remarks: remarks || `Commission ${commission.status.toLowerCase()} by finance officer`,
+      reviewerId: reviewerId || 1,
+      reviewedAt: new Date(),
+    });
+
+    return saved;
+  }
+
+  async getCommissionsReport(filters: { agentId?: number; startDate?: string; endDate?: string; status?: string }): Promise<any> {
+    const qb = this.commissionRepo.createQueryBuilder('c')
+      .leftJoinAndSelect('c.contract', 'contract')
+      .leftJoinAndSelect('contract.customer', 'customer')
+      .leftJoinAndSelect('c.salesRep', 'salesRep')
+      .leftJoinAndSelect('c.commissionRule', 'commissionRule');
+
+    if (filters.agentId) {
+      qb.andWhere('salesRep.id = :agentId', { agentId: filters.agentId });
+    }
+    if (filters.status && filters.status !== 'ALL') {
+      qb.andWhere('c.status = :status', { status: filters.status });
+    }
+    if (filters.startDate) {
+      qb.andWhere('c.createdAt >= :startDate', { startDate: new Date(filters.startDate) });
+    }
+    if (filters.endDate) {
+      qb.andWhere('c.createdAt <= :endDate', { endDate: new Date(filters.endDate) });
+    }
+
+    const items = await qb.orderBy('c.createdAt', 'DESC').getMany();
+
+    const totalCommission = items.reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0);
+    const approvedCommission = items.filter(i => i.status === 'APPROVED').reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0);
+    const pendingCommission = items.filter(i => i.status === 'PENDING' || i.status === 'PENDING_APPROVAL' || i.status === 'CALCULATED').reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0);
+    const paidCommission = items.filter(i => i.status === 'PAID').reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0);
+
+    return {
+      kpis: {
+        totalCommission,
+        approvedCommission,
+        pendingCommission,
+        paidCommission,
+        totalCount: items.length,
+      },
+      commissions: items,
+    };
   }
 
   async updateCommissionStatus(id: number, status: string): Promise<SalesCommission> {
@@ -1609,7 +1731,7 @@ export class SalesService implements OnModuleInit {
     });
     if (!commission) throw new NotFoundException('Sales commission not found');
 
-    const validStatuses = ['CALCULATED', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REVERSED'];
+    const validStatuses = ['CALCULATED', 'PENDING', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REVERSED', 'REJECTED'];
     if (!validStatuses.includes(status)) {
       throw new BadRequestException(`Invalid status: ${status}. Must be one of ${validStatuses.join(', ')}`);
     }

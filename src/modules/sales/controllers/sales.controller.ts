@@ -39,6 +39,7 @@ import {
   UpdateContractStatusDto,
   CreateContractAmendmentDto,
   SendInstallmentReminderDto,
+  ReviewCommissionDto,
 } from '../dto/sales.dto';
 
 @ApiTags('Sales Management')
@@ -304,11 +305,16 @@ export class SalesController {
     return this.service.getDiscountRequests();
   }
 
+  @Get('discounts/:id/history')
+  getDiscountHistory(@Param('id') id: string) {
+    return this.service.getDiscountHistory(+id);
+  }
+
   @Put('discounts/:id/approve')
   approveDiscountRequest(
     @Param('id') id: string,
-    @Body('approverId') approverId: number,
-    @Body('comment') comment: string,
+    @Body('approverId') approverId?: number,
+    @Body('comment') comment?: string,
   ) {
     return this.service.approveDiscountRequest(+id, approverId || 1, comment || 'Approved');
   }
@@ -316,8 +322,8 @@ export class SalesController {
   @Put('discounts/:id/reject')
   rejectDiscountRequest(
     @Param('id') id: string,
-    @Body('approverId') approverId: number,
-    @Body('comment') comment: string,
+    @Body('approverId') approverId?: number,
+    @Body('comment') comment?: string,
   ) {
     return this.service.rejectDiscountRequest(+id, approverId || 1, comment || 'Rejected');
   }
@@ -336,6 +342,34 @@ export class SalesController {
   @Get('commissions')
   getCommissions() {
     return this.service.getCommissions();
+  }
+
+  @Get('commissions/report')
+  getCommissionsReport(
+    @Query('agentId') agentId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.service.getCommissionsReport({
+      agentId: agentId ? +agentId : undefined,
+      startDate,
+      endDate,
+      status,
+    });
+  }
+
+  @Put('commissions/:id/review')
+  reviewCommission(
+    @Param('id') id: string,
+    @Body() dto: ReviewCommissionDto,
+  ) {
+    return this.service.reviewCommission(+id, dto.action, dto.remarks, dto.reviewerId);
+  }
+
+  @Post('commissions/calculate/:contractId')
+  calculateCommission(@Param('contractId') contractId: string) {
+    return this.service.calculateCommissions(+contractId);
   }
 
   @Patch('commissions/:id/status')

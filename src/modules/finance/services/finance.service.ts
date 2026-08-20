@@ -37,6 +37,7 @@ import {
   CreatePenaltyConfigDto,
   WaivePenaltyDto,
   CreateReminderConfigDto,
+  AdjustPaymentDto,
 } from '../dto/finance.dto';
 
 @Injectable()
@@ -234,6 +235,25 @@ export class FinanceService implements OnModuleInit {
     });
     if (!payment) throw new NotFoundException('Payment transaction not found.');
     return payment;
+  }
+
+  async getPaymentHistory(id: number): Promise<any> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id },
+      relations: { contract: true, customer: true, paymentMethod: true },
+    });
+    if (!payment) throw new NotFoundException('Payment transaction not found.');
+
+    const approvals = await this.approvalRepo.find({
+      where: { payment: { id } },
+      order: { id: 'ASC' },
+    });
+
+    return {
+      payment,
+      history: approvals,
+      remarksNotes: payment.remarks ? payment.remarks.split('\n').filter(r => r.trim() !== '') : [],
+    };
   }
 
   // --- Payment Approval Workflow & Allocation FIFO ---
@@ -457,6 +477,106 @@ export class FinanceService implements OnModuleInit {
     await this.updateCustomerBalance(payment.contract.id, payment.customer.id);
 
     return saved;
+  }
+
+  // --- Payment Adjustment (TC-6.06) ---
+  async adjustPayment(id: number, approverId: number, dto: AdjustPaymentDto): Promise<Payment> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id },
+      relations: { contract: true, customer: true, paymentMethod: true },
+    });
+    if (!payment) throw new NotFoundException('Payment not found.');
+    if (payment.status !== 'APPROVED') {
+      throw new BadRequestException('Only approved payments can be adjusted.');
+    }
+
+    const previousAmount = Number(payment.paymentAmount);
+    const newAmount = Number(dto.adjustedAmount);
+
+    if (newAmount <= 0) {
+      throw new BadRequestException('Adjusted payment amount must be greater than zero.');
+    }
+    if (!dto.adjustmentReason || dto.adjustmentReason.trim() === '') {
+      throw new BadRequestException('Adjustment reason is mandatory.');
+    }
+
+    // 1. Update payment amount and record history in remarks
+    payment.paymentAmount = newAmount;
+    const historyNote = `[ADJUSTMENT on ${new Date().toLocaleDateString()}] Adjusted from ETB ${previousAmount.toLocaleString()} to ETB ${newAmount.toLocaleString()} by User #${approverId}. Reason: ${dto.adjustmentReason}`;
+    payment.remarks = payment.remarks ? `${payment.remarks}\n${historyNote}` : historyNote;
+    const savedPayment = await this.paymentRepo.save(payment);
+
+    // 2. Log in payment approval / audit trail
+    const adjustmentLog = this.approvalRepo.create({
+      payment: savedPayment,
+      approvalStatus: 'APPROVED',
+      approvalComment: `Payment adjusted from ETB ${previousAmount} to ETB ${newAmount}. Reason: ${dto.adjustmentReason}`,
+      approvedBy: approverId,
+      approvalDate: new Date(),
+    });
+    await this.approvalRepo.save(adjustmentLog);
+
+    // 3. Re-calculate allocations on linked installment schedules
+    const oldAllocations = await this.allocationRepo.find({
+      where: { payment: { id: payment.id } },
+      relations: { installment: true },
+    });
+    for (const alloc of oldAllocations) {
+      const schedule = alloc.installment;
+      schedule.paidAmount = Math.max(0, Number(schedule.paidAmount || 0) - Number(alloc.allocatedAmount));
+      const scheduleTotal = Number(schedule.installmentAmount) + Number(schedule.penaltyAmount);
+      schedule.outstandingAmount = Math.max(0, scheduleTotal - schedule.paidAmount);
+      schedule.status = schedule.paidAmount === 0 ? 'PENDING' : 'PARTIAL';
+      await this.scheduleRepo.save(schedule);
+      await this.allocationRepo.remove(alloc);
+    }
+
+    // Re-run FIFO allocation with the new amount
+    const schedules = await this.scheduleRepo.find({
+      where: { contract: { id: payment.contract.id } },
+      order: { installmentNo: 'ASC' },
+    });
+
+    let remainingAmount = newAmount;
+    const newAllocations: PaymentAllocation[] = [];
+
+    for (const schedule of schedules) {
+      if (remainingAmount <= 0) break;
+
+      const scheduleTotal = Number(schedule.installmentAmount) + Number(schedule.penaltyAmount);
+      const schedulePaid = Number(schedule.paidAmount || 0);
+      const scheduleOutstanding = Math.max(0, scheduleTotal - schedulePaid);
+
+      if (scheduleOutstanding <= 0) continue;
+
+      const allocated = Math.min(remainingAmount, scheduleOutstanding);
+      schedule.paidAmount = schedulePaid + allocated;
+      schedule.outstandingAmount = Math.max(0, scheduleTotal - schedule.paidAmount);
+      schedule.status = schedule.outstandingAmount === 0 ? 'PAID' : 'PARTIAL';
+      if (schedule.status === 'PAID') {
+        schedule.paymentDate = new Date();
+      }
+
+      await this.scheduleRepo.save(schedule);
+
+      const allocation = this.allocationRepo.create({
+        payment: savedPayment,
+        installment: schedule,
+        allocatedAmount: allocated,
+      });
+      newAllocations.push(allocation);
+
+      remainingAmount -= allocated;
+    }
+
+    if (newAllocations.length > 0) {
+      await this.allocationRepo.save(newAllocations);
+    }
+
+    // 4. Update customer balance snapshot (with overpayment advance credit balance)
+    await this.updateCustomerBalance(payment.contract.id, payment.customer.id);
+
+    return savedPayment;
   }
 
   // --- Reschedule Installments ---
@@ -691,6 +811,87 @@ ${template?.signatureText || ''}
     return this.receiptRepo.save(r);
   }
 
+  // --- Email Receipt (TC-6.14) ---
+  async emailReceipt(id: number, targetEmail?: string): Promise<any> {
+    const r = await this.receiptRepo.findOne({
+      where: { id },
+      relations: {
+        payment: {
+          customer: true,
+          contract: true,
+          paymentMethod: true,
+        },
+      },
+    });
+    if (!r) throw new NotFoundException('Receipt reference not found.');
+
+    const payment = r.payment;
+    const customer = payment.customer;
+    const recipientEmail = targetEmail || customer?.primaryEmail;
+    const amountStr = Number(payment.paymentAmount || 0).toLocaleString();
+    const verifyUrl = `http://localhost:4200/verify-receipt?receiptNo=${r.receiptNumber}`;
+
+    await this.notificationsService.sendNotification({
+      categoryCode: 'PAYMENT',
+      title: `Official Receipt #${r.receiptNumber} - IHSAN Properties`,
+      body: `Dear ${customer?.fullName || 'Valued Customer'},\n\nPlease find the details of your payment receipt below:\n\n` +
+            `• Receipt Number: ${r.receiptNumber}\n` +
+            `• Payment Reference: ${payment.paymentReference}\n` +
+            `• Contract No: ${payment.contract?.contractNo}\n` +
+            `• Amount Paid: ETB ${amountStr}\n` +
+            `• Payment Method: ${payment.paymentMethod?.paymentMethodName || 'Direct'}\n` +
+            `• Date: ${new Date(r.receiptDate).toLocaleDateString()}\n\n` +
+            `You can verify the authenticity of this official receipt online here:\n${verifyUrl}\n\n` +
+            `Thank you for your business.\nIHSAN Properties & Business Service PLC`,
+      referenceTypeId: 'PAYMENT',
+      referenceId: payment.id,
+      recipients: [
+        {
+          recipientName: customer?.fullName || 'Customer',
+          emailAddress: recipientEmail || undefined,
+          phoneNumber: customer?.primaryPhone,
+        },
+      ],
+    });
+
+    return {
+      success: true,
+      receiptNumber: r.receiptNumber,
+      recipient: recipientEmail,
+      message: `Receipt #${r.receiptNumber} successfully emailed to ${recipientEmail || 'customer'}!`,
+    };
+  }
+
+  // --- Verify Receipt (TC-6.15) ---
+  async verifyReceipt(receiptNumber: string): Promise<any> {
+    const r = await this.receiptRepo.findOne({
+      where: { receiptNumber },
+      relations: {
+        payment: {
+          customer: true,
+          contract: true,
+          paymentMethod: true,
+        },
+      },
+    });
+    if (!r) throw new NotFoundException(`Receipt "${receiptNumber}" is invalid or does not exist.`);
+
+    return {
+      verified: true,
+      receiptNumber: r.receiptNumber,
+      paymentReference: r.payment.paymentReference,
+      contractNumber: r.payment.contract?.contractNo,
+      customerName: r.payment.customer?.fullName,
+      amountPaid: Number(r.payment.paymentAmount),
+      paymentDate: r.receiptDate,
+      paymentMethod: r.payment.paymentMethod?.paymentMethodName,
+      paymentStatus: r.payment.status,
+      issuer: 'IHSAN Properties & Business Service PLC',
+      verificationTimestamp: new Date(),
+      authenticityStatus: 'GENUINE & AUTHENTICATED',
+    };
+  }
+
   // --- Customer Outstanding Balance Calculations (Materialized) ---
   private async updateCustomerBalance(contractId: number, customerId: number): Promise<void> {
     const contract = await this.contractRepo.findOne({ where: { id: contractId } });
@@ -709,8 +910,13 @@ ${template?.signatureText || ''}
     });
     const totalPenalty = schedules.reduce((sum, s) => sum + Number(s.penaltyAmount), 0);
 
+    // Compute advance credit for overpayments:
+    // Any approved payments that exceed the sum of allocated/settled installments is stored as advance credit
+    const totalAllocatedToSchedules = schedules.reduce((sum, s) => sum + Number(s.paidAmount || 0), 0);
+    const advanceCredit = Math.max(0, totalPaid - totalAllocatedToSchedules);
+
     const contractAmt = Number(contract.contractAmount);
-    const outstanding = contractAmt + totalPenalty - totalPaid;
+    const outstanding = Math.max(0, contractAmt + totalPenalty - totalPaid);
 
     let balance = await this.balanceRepo.findOne({
       where: { contract: { id: contractId }, customer: { id: customerId } },
@@ -724,6 +930,7 @@ ${template?.signatureText || ''}
         totalPaid,
         totalPenalty,
         outstandingBalance: outstanding,
+        advanceCreditBalance: advanceCredit,
         lastUpdated: new Date(),
       });
     } else {
@@ -731,6 +938,7 @@ ${template?.signatureText || ''}
       balance.totalPaid = totalPaid;
       balance.totalPenalty = totalPenalty;
       balance.outstandingBalance = outstanding;
+      balance.advanceCreditBalance = advanceCredit;
       balance.lastUpdated = new Date();
     }
 
@@ -765,6 +973,8 @@ ${template?.signatureText || ''}
           where: { contract: { id: sc.id } },
         });
         const totalPenalty = schedules.reduce((sum, s) => sum + Number(s.penaltyAmount), 0);
+        const totalAllocated = schedules.reduce((sum, s) => sum + Number(s.paidAmount || 0), 0);
+        const advanceCredit = Math.max(0, totalPaid - totalAllocated);
 
         results.push({
           customer_id: customerId,
@@ -773,7 +983,8 @@ ${template?.signatureText || ''}
           property_price: Number(sc.contractAmount),
           total_paid: totalPaid,
           total_penalty: totalPenalty,
-          outstanding_balance: Number(sc.contractAmount) + totalPenalty - totalPaid,
+          outstanding_balance: Math.max(0, Number(sc.contractAmount) + totalPenalty - totalPaid),
+          advance_credit_balance: advanceCredit,
         });
       }
       return results;
@@ -895,6 +1106,22 @@ ${template?.signatureText || ''}
         });
         await this.reminderRepo.save(reminder);
         count++;
+
+        // Dispatch via multi-channel notification engine (Email & Telegram)
+        await this.notificationsService.sendNotification({
+          categoryCode: 'PAYMENT',
+          title: `Upcoming Payment Due Reminder - Installment #${schedule.installmentNo}`,
+          body: message,
+          referenceTypeId: 'INSTALLMENT',
+          referenceId: schedule.id,
+          recipients: [
+            {
+              recipientName: schedule.contract.customer.fullName,
+              emailAddress: schedule.contract.customer.primaryEmail || undefined,
+              phoneNumber: schedule.contract.customer.primaryPhone,
+            },
+          ],
+        }).catch(err => this.logger.error('Failed to send reminder notification', err));
       }
 
       // Trigger after due date (Overdue warning escalation)
@@ -905,13 +1132,29 @@ ${template?.signatureText || ''}
           contract: schedule.contract,
           installment: schedule,
           customer: schedule.contract.customer,
-          notificationType: config.telegramEnabled ? 'TELEGRAM' : 'SMS',
+          notificationType: config.emailEnabled ? 'EMAIL' : (config.telegramEnabled ? 'TELEGRAM' : 'SMS'),
           reminderDate: today,
           deliveryStatus: 'SENT',
           messageContent: message,
         });
         await this.reminderRepo.save(reminder);
         count++;
+
+        // Dispatch via multi-channel notification engine (Email & Telegram)
+        await this.notificationsService.sendNotification({
+          categoryCode: 'PAYMENT',
+          title: `URGENT: Overdue Payment Notice - Installment #${schedule.installmentNo}`,
+          body: message,
+          referenceTypeId: 'INSTALLMENT',
+          referenceId: schedule.id,
+          recipients: [
+            {
+              recipientName: schedule.contract.customer.fullName,
+              emailAddress: schedule.contract.customer.primaryEmail || undefined,
+              phoneNumber: schedule.contract.customer.primaryPhone,
+            },
+          ],
+        }).catch(err => this.logger.error('Failed to send overdue reminder notification', err));
       }
     }
 
