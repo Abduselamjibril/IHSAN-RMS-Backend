@@ -108,7 +108,7 @@ volumes:
 ---
 
 ## Step 3: Run the Application on the VPS
-
+cd /var/www/ihsan
 Once the files are created, run the following commands on your VPS terminal:
 
 1. **Pull the latest image**:
