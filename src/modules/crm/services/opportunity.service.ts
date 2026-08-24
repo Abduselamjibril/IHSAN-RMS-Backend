@@ -11,6 +11,7 @@ import { LeadStatus } from '../entities/lead-status.entity';
 import { LeadActivity } from '../entities/lead-activity.entity';
 import { SalesAgent } from '../entities/sales-agent.entity';
 import { NotificationService } from './notification.service';
+import { parseDatePreservingLocal } from './lead-service';
 
 @Injectable()
 export class OpportunityService {
@@ -385,12 +386,13 @@ export class OpportunityService {
       if (lead) {
         lead.lastContactedAt = new Date();
         if (dto.nextActionDate) {
-          lead.nextFollowupAt = dto.nextActionDate;
+          const followupDate = parseDatePreservingLocal(dto.nextActionDate);
+          lead.nextFollowupAt = followupDate;
           
           await this.notificationService.createReminder(
             lead,
             opp.assignedSalesAgent || lead.assignedSalesAgent,
-            new Date(dto.nextActionDate),
+            followupDate,
             `Opportunity Follow-up: ${dto.subject || 'Interaction logged'}`,
             `Scheduled follow-up reminder for opportunity "${opp.title}" (Lead: ${lead.fullName}). Notes: ${dto.description || ''}`
           );

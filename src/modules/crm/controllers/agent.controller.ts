@@ -5,6 +5,7 @@ import { SalesAgent } from '../entities/sales-agent.entity';
 import { LeadSource } from '../entities/lead-source.entity';
 import { LeadStatus } from '../entities/lead-status.entity';
 import { NotificationService } from '../services/notification.service';
+import { parseDatePreservingLocal } from '../services/lead-service';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { CreateAgentDto, UpdateAgentDto } from '../dto/agent.dto';
 
@@ -141,7 +142,8 @@ export class AgentController {
   @ApiResponse({ status: 404, description: 'Reminder not found' })
   async rescheduleReminder(@Param('id') id: string, @Body('datetime') datetime: string) {
     try {
-      return await this.notificationService.rescheduleReminder(+id, new Date(datetime));
+      const parsedDate = parseDatePreservingLocal(datetime);
+      return await this.notificationService.rescheduleReminder(+id, parsedDate);
     } catch (err) {
       throw new NotFoundException(err.message);
     }

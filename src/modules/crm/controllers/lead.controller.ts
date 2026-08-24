@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Res, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, Res, Req, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -115,14 +115,21 @@ export class LeadController {
       type: 'object',
       properties: {
         agentId: { type: 'number', example: 1, description: 'Sales agent ID' },
+        performedBy: { type: 'string', example: 'Abel Manager', description: 'User performing assignment' },
       },
       required: ['agentId'],
     },
   })
   @ApiResponse({ status: 200, description: 'Lead successfully assigned' })
   @ApiResponse({ status: 404, description: 'Lead or agent not found' })
-  async assign(@Param('id') id: string, @Body('agentId') agentId: number) {
-    return this.leadService.assignAgent(+id, agentId);
+  async assign(
+    @Param('id') id: string,
+    @Body('agentId') agentId: number,
+    @Body('performedBy') performedBy?: string,
+    @Req() req?: any,
+  ) {
+    const user = performedBy || req?.user?.fullName || req?.user?.username || 'Admin User';
+    return this.leadService.assignAgent(+id, agentId, user);
   }
 
   @Post(':id/status')

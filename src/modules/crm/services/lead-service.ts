@@ -18,6 +18,18 @@ import { DocumentService } from './document.service';
 import { CreateLeadDto } from '../dto/create-lead.dto';
 import { UpdateLeadDto } from '../dto/update-lead.dto';
 import { AddActivityDto } from '../dto/add-activity.dto';
+export function parseDatePreservingLocal(dateVal: any): Date {
+  if (!dateVal) return new Date();
+  if (dateVal instanceof Date) return dateVal;
+  const str = String(dateVal).trim();
+  if (str.includes('T') && !str.endsWith('Z') && !str.includes('+')) {
+    const [datePart, timePart] = str.split('T');
+    const [year, month, day] = datePart.split('-').map(Number);
+    const timeParts = timePart.split(':').map(Number);
+    return new Date(year, month - 1, day, timeParts[0] || 0, timeParts[1] || 0, timeParts[2] || 0);
+  }
+  return new Date(dateVal);
+}
 
 @Injectable()
 export class LeadService {
@@ -469,7 +481,7 @@ export class LeadService {
     return savedLead;
   }
 
-  async assignAgent(id: number, agentId: number): Promise<Lead> {
+  async assignAgent(id: number, agentId: number, performedBy: string = 'Admin User'): Promise<Lead> {
     const lead = await this.leadRepo.findOne({ where: { id, isDeleted: false } });
     if (!lead) {
       throw new NotFoundException(`Lead with ID ${id} not found`);
@@ -488,7 +500,7 @@ export class LeadService {
     act.activityType = 'Assignment';
     act.activityDate = new Date();
     act.subject = 'Agent Assigned';
-    act.description = `Lead successfully assigned to: ${agent.fullName}`;
+    act.description = `Lead assigned to: ${agent.fullName} (Assigned by: ${performedBy})`;
     await this.leadActivityRepo.save(act);
 
     await this.notificationService.triggerAssignmentNotification(savedLead, agent);
@@ -550,13 +562,15 @@ export class LeadService {
     // Also update lastContactedAt on the lead
     lead.lastContactedAt = new Date();
     if (dto.nextActionDate) {
-      lead.nextFollowupAt = dto.nextActionDate;
+      const followupDate = parseDatePreservingLocal(dto.nextActionDate);
+      act.nextActionDate = followupDate;
+      lead.nextFollowupAt = followupDate;
 
       // Also create a FollowupReminder record
       await this.notificationService.createReminder(
         lead,
         lead.assignedSalesAgent,
-        new Date(dto.nextActionDate),
+        followupDate,
         `Follow-up: ${dto.subject || 'Interaction logged'}`,
         `Scheduled follow-up reminder for lead ${lead.fullName}. Notes: ${dto.description || ''}`
       );

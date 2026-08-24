@@ -81,41 +81,58 @@ export class CrmSeederService implements OnModuleInit {
   }
 
   private async seedLeadStatuses() {
-    const count = await this.leadStatusRepo.count();
-    if (count === 0) {
-      this.logger.log('Seeding CRM Lead Statuses...');
-      const statuses = [
-        { statusName: 'New', colorCode: '#3b82f6', sortOrder: 1, isClosed: false, isConverted: false },
-        { statusName: 'Contacted', colorCode: '#eab308', sortOrder: 2, isClosed: false, isConverted: false },
-        { statusName: 'Qualified', colorCode: '#10b981', sortOrder: 3, isClosed: false, isConverted: false },
-        { statusName: 'Proposal Sent', colorCode: '#a855f7', sortOrder: 4, isClosed: false, isConverted: false },
-        { statusName: 'Converted', colorCode: '#14b8a6', sortOrder: 5, isClosed: true, isConverted: true },
-        { statusName: 'Lost', colorCode: '#ef4444', sortOrder: 6, isClosed: true, isConverted: false },
-      ];
-      await this.leadStatusRepo.save(statuses);
-      this.logger.log(`Seeded ${statuses.length} Lead Statuses.`);
+    const requiredStatuses = [
+      { statusName: 'New', colorCode: '#64748b', sortOrder: 1, isClosed: false, isConverted: false },
+      { statusName: 'Contacted', colorCode: '#3b82f6', sortOrder: 2, isClosed: false, isConverted: false },
+      { statusName: 'Interested', colorCode: '#8b5cf6', sortOrder: 3, isClosed: false, isConverted: false },
+      { statusName: 'Site Visit Scheduled', colorCode: '#f59e0b', sortOrder: 4, isClosed: false, isConverted: false },
+      { statusName: 'Negotiation', colorCode: '#ec4899', sortOrder: 5, isClosed: false, isConverted: false },
+      { statusName: 'Qualified', colorCode: '#06b6d4', sortOrder: 6, isClosed: false, isConverted: false },
+      { statusName: 'Proposal Sent', colorCode: '#a855f7', sortOrder: 7, isClosed: false, isConverted: false },
+      { statusName: 'Converted', colorCode: '#22c55e', sortOrder: 8, isClosed: true, isConverted: true },
+      { statusName: 'Lost', colorCode: '#ef4444', sortOrder: 9, isClosed: true, isConverted: false },
+    ];
+
+    for (const st of requiredStatuses) {
+      let existing = await this.leadStatusRepo.findOne({ where: { statusName: st.statusName } });
+      if (!existing) {
+        existing = this.leadStatusRepo.create(st);
+      } else {
+        existing.colorCode = st.colorCode;
+        existing.sortOrder = st.sortOrder;
+        existing.isClosed = st.isClosed;
+        existing.isConverted = st.isConverted;
+      }
+      await this.leadStatusRepo.save(existing);
     }
+    this.logger.log(`Seeded / Synced ${requiredStatuses.length} Lead Statuses.`);
   }
 
   private async seedOpportunityStages() {
     const requiredStages = [
       { stageName: 'New Opportunity', sortOrder: 1, probabilityPercent: 10.0, colorCode: '#3b82f6', isClosed: false },
-      { stageName: 'Qualified', sortOrder: 2, probabilityPercent: 25.0, colorCode: '#6366f1', isClosed: false },
+      { stageName: 'Qualification', sortOrder: 2, probabilityPercent: 25.0, colorCode: '#06b6d4', isClosed: false },
       { stageName: 'Property Viewing', sortOrder: 3, probabilityPercent: 40.0, colorCode: '#8b5cf6', isClosed: false },
-      { stageName: 'Negotiation', sortOrder: 4, probabilityPercent: 60.0, colorCode: '#eab308', isClosed: false },
-      { stageName: 'Reservation', sortOrder: 5, probabilityPercent: 75.0, colorCode: '#ec4899', isClosed: false },
-      { stageName: 'Contract Processing', sortOrder: 6, probabilityPercent: 90.0, colorCode: '#14b8a6', isClosed: false },
-      { stageName: 'Won', sortOrder: 7, probabilityPercent: 100.0, colorCode: '#10b981', isClosed: true },
-      { stageName: 'Lost', sortOrder: 8, probabilityPercent: 0.0, colorCode: '#ef4444', isClosed: true },
+      { stageName: 'Needs Analysis', sortOrder: 4, probabilityPercent: 50.0, colorCode: '#f59e0b', isClosed: false },
+      { stageName: 'Proposal/Price Quote', sortOrder: 5, probabilityPercent: 70.0, colorCode: '#a855f7', isClosed: false },
+      { stageName: 'Negotiation', sortOrder: 6, probabilityPercent: 85.0, colorCode: '#ec4899', isClosed: false },
+      { stageName: 'Closed Won', sortOrder: 7, probabilityPercent: 100.0, colorCode: '#22c55e', isClosed: true },
+      { stageName: 'Closed Lost', sortOrder: 8, probabilityPercent: 0.0, colorCode: '#ef4444', isClosed: true },
     ];
 
     for (const stageData of requiredStages) {
-      const existing = await this.opportunityStageRepo.findOne({
-        where: [{ stageName: stageData.stageName }, { sortOrder: stageData.sortOrder }],
+      let existing = await this.opportunityStageRepo.findOne({
+        where: { stageName: stageData.stageName },
       });
       if (!existing) {
-        await this.opportunityStageRepo.save(stageData);
+        existing = this.opportunityStageRepo.create(stageData);
+      } else {
+        existing.sortOrder = stageData.sortOrder;
+        existing.probabilityPercent = stageData.probabilityPercent;
+        existing.colorCode = stageData.colorCode;
+        existing.isClosed = stageData.isClosed;
       }
+      await this.opportunityStageRepo.save(existing);
     }
   }
 
