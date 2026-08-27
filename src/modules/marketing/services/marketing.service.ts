@@ -24,6 +24,7 @@ import { Lead } from '../../crm/entities/lead.entity';
 import { LeadSource } from '../../crm/entities/lead-source.entity';
 import { Customer } from '../../crm/entities/customer.entity';
 import { SalesBooking } from '../../sales/entities/sales-booking.entity';
+import { SalesContract } from '../../sales/entities/sales-contract.entity';
 
 // DTOs
 import {
@@ -76,13 +77,15 @@ export class MarketingService {
     private readonly customerRepo: Repository<Customer>,
     @InjectRepository(SalesBooking)
     private readonly bookingRepo: Repository<SalesBooking>,
+    @InjectRepository(SalesContract)
+    private readonly contractRepo: Repository<SalesContract>,
   ) {}
 
   // --- Auto Campaign Status Transition & Validation Helpers ---
   async checkAndUpdateCampaignStatuses(): Promise<void> {
     const now = new Date();
     const activeCampaigns = await this.campaignRepo.find({
-      where: { campaignStatus: 'ACTIVE' },
+      where: [{ campaignStatus: 'ACTIVE' }, { campaignStatus: 'Active' }],
     });
 
     for (const campaign of activeCampaigns) {
@@ -394,23 +397,66 @@ export class MarketingService {
       const utilizedBudget = budget ? Number(budget.utilizedBudget) : 0;
       const remainingBudget = budgetAmount - utilizedBudget;
 
-      const leadsGenerated = await this.marketingLeadRepo.count({
+      const marketingLeadCount = await this.marketingLeadRepo.count({
         where: { campaign: { id: c.id } },
       });
 
-      const salesGenerated = await this.marketingLeadRepo.createQueryBuilder('ml')
+      const directLeadCount = await this.leadRepo.createQueryBuilder('l')
+        .leftJoin('l.leadSource', 'ls')
+        .where('UPPER(ls.source_name) LIKE UPPER(:cName) OR UPPER(l.remarks) LIKE UPPER(:cCode) OR UPPER(l.remarks) LIKE UPPER(:cName)', {
+          cName: `%${c.campaignName}%`,
+          cCode: `%${c.campaignCode}%`,
+        })
+        .getCount();
+
+      const leadsGenerated = Math.max(marketingLeadCount, directLeadCount);
+
+      const salesFromMarketing = await this.marketingLeadRepo.createQueryBuilder('ml')
         .innerJoin('crm_customer', 'cust', 'cust.lead_id = ml.lead_id')
         .where('ml.campaign_id = :cId', { cId: c.id })
         .getCount();
 
+      const salesFromDirect = await this.leadRepo.createQueryBuilder('l')
+        .innerJoin('crm_customer', 'cust', 'cust.lead_id = l.id')
+        .leftJoin('l.leadSource', 'ls')
+        .where('UPPER(ls.source_name) LIKE UPPER(:cName) OR UPPER(l.remarks) LIKE UPPER(:cCode) OR UPPER(l.remarks) LIKE UPPER(:cName)', {
+          cName: `%${c.campaignName}%`,
+          cCode: `%${c.campaignCode}%`,
+        })
+        .getCount();
+
+      const salesGenerated = Math.max(salesFromMarketing, salesFromDirect);
+
       const bookingsRaw = await this.bookingRepo.createQueryBuilder('s')
         .innerJoin('crm_customer', 'cust', 's.customer_id = cust.id')
-        .innerJoin('rems_marketing_lead', 'ml', 'cust.lead_id = ml.lead_id')
-        .where('ml.campaign_id = :cId', { cId: c.id })
+        .leftJoin('rems_marketing_lead', 'ml', 'cust.lead_id = ml.lead_id')
+        .leftJoin('crm_lead', 'l', 'cust.lead_id = l.id')
+        .leftJoin('l.leadSource', 'ls')
+        .where('ml.campaign_id = :cId OR UPPER(ls.source_name) LIKE UPPER(:cName) OR UPPER(l.remarks) LIKE UPPER(:cCode)', {
+          cId: c.id,
+          cName: `%${c.campaignName}%`,
+          cCode: `%${c.campaignCode}%`,
+        })
         .select('SUM(s.booking_amount)', 'revenue')
         .getRawOne();
 
-      const revenueGenerated = bookingsRaw?.revenue ? Number(bookingsRaw.revenue) : 0;
+      const contractsRaw = await this.contractRepo.createQueryBuilder('sc')
+        .innerJoin('crm_customer', 'cust', 'sc.customer_id = cust.id')
+        .leftJoin('rems_marketing_lead', 'ml', 'cust.lead_id = ml.lead_id')
+        .leftJoin('crm_lead', 'l', 'cust.lead_id = l.id')
+        .leftJoin('l.leadSource', 'ls')
+        .where('ml.campaign_id = :cId OR UPPER(ls.source_name) LIKE UPPER(:cName) OR UPPER(l.remarks) LIKE UPPER(:cCode)', {
+          cId: c.id,
+          cName: `%${c.campaignName}%`,
+          cCode: `%${c.campaignCode}%`,
+        })
+        .select('SUM(sc.property_price)', 'revenue')
+        .getRawOne();
+
+      const bookingRev = bookingsRaw?.revenue ? Number(bookingsRaw.revenue) : 0;
+      const contractRev = contractsRaw?.revenue ? Number(contractsRaw.revenue) : 0;
+      const revenueGenerated = Math.max(bookingRev, contractRev, (bookingRev > 0 || contractRev > 0) ? Math.max(bookingRev, contractRev) : 0);
+
       const conversionRate = leadsGenerated > 0 ? (salesGenerated / leadsGenerated) * 100 : 0;
       const roiPercentage = utilizedBudget > 0 ? ((revenueGenerated - utilizedBudget) / utilizedBudget) * 100 : 0;
 
@@ -530,6 +576,7 @@ export class MarketingService {
     
     const revenueGenerated = bookings?.revenue ? Number(bookings.revenue) : 0;
     const roi = marketingCost > 0 ? ((revenueGenerated - marketingCost) / marketingCost) * 100 : 0;
+    const costPerLead = totalLeads > 0 ? marketingCost / totalLeads : 0;
 
     return {
       totalLeads,
@@ -537,6 +584,8 @@ export class MarketingService {
       convertedLeads,
       conversionRate: Math.round(conversionRate * 100) / 100,
       marketingCost,
+      costPerLead: Math.round(costPerLead * 100) / 100,
+      cpl: Math.round(costPerLead * 100) / 100,
       revenueGenerated,
       roi: Math.round(roi * 100) / 100,
     };

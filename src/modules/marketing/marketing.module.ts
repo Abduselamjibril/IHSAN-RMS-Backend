@@ -8,6 +8,7 @@ import { Customer } from '../crm/entities/customer.entity';
 
 // Sales entities referenced
 import { SalesBooking } from '../sales/entities/sales-booking.entity';
+import { SalesContract } from '../sales/entities/sales-contract.entity';
 
 // Marketing entities
 import { MarketingCampaign } from './entities/marketing-campaign.entity';
@@ -38,6 +39,7 @@ import { MarketingController } from './controllers/marketing.controller';
       LeadSource,
       Customer,
       SalesBooking,
+      SalesContract,
 
       MarketingCampaign,
       CampaignBudget,
