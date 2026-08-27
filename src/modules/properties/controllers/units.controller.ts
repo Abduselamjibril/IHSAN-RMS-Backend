@@ -51,7 +51,9 @@ export class UnitsController {
   updateUnit(@Param('id') id: string, @Body() dto: UpdateUnitDto, @Req() req: any) {
     const user = req.user;
     const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
-    return this.service.updateUnit(+id, dto, username);
+    const roles = user?.roles || [];
+    const isManagerOrAdmin = roles.includes('System Administrator') || roles.includes('Sales Manager') || roles.includes('Finance Officer');
+    return this.service.updateUnit(+id, dto, username, isManagerOrAdmin);
   }
 
   @Delete(':id')

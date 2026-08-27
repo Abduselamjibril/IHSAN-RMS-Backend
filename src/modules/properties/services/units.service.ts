@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { Unit } from '../entities/unit.entity';
@@ -237,7 +237,7 @@ export class UnitsService {
     };
   }
 
-  async updateUnit(id: number, dto: UpdateUnitDto, changedBy = 'System'): Promise<Unit> {
+  async updateUnit(id: number, dto: UpdateUnitDto, changedBy = 'System', isManagerOrAdmin = true): Promise<Unit> {
     const unit = await this.unitRepo.findOne({ where: { id, isDeleted: false } });
     if (!unit) throw new NotFoundException(`Unit with ID ${id} not found.`);
 
@@ -280,6 +280,10 @@ export class UnitsService {
 
     const oldPrice = unit.currentPrice ? Number(unit.currentPrice) : 0;
     const priceChanged = dto.currentPrice !== undefined && Number(dto.currentPrice) !== oldPrice;
+
+    if (priceChanged && !isManagerOrAdmin) {
+      throw new ForbiddenException('Direct price updates are not allowed for your role. Please submit a Price Change Request for Manager approval.');
+    }
 
     Object.assign(unit, dto);
     const saved = await this.unitRepo.save(unit);

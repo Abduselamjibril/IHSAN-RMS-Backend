@@ -202,7 +202,9 @@ export class PropertiesService {
                 (fRest as any).units = allUnits
                   .filter((u) => u.floor && +u.floor.id === +f.id);
                 // Attach floor plan to each floor
-                (fRest as any).floorPlan = allFloorPlans.find((fp) => fp.floor && +fp.floor.id === +f.id) || null;
+                const floorPlans = allFloorPlans.filter((fp) => fp.floor && +fp.floor.id === +f.id);
+                (fRest as any).floorPlan = floorPlans[0] || null;
+                (fRest as any).allFloorPlans = floorPlans;
                 return fRest;
               });
             return bRest;
@@ -241,11 +243,12 @@ export class PropertiesService {
       });
       for (const f of floors) {
         (f as any).units = units.filter((u) => u.floor && +u.floor.id === +f.id);
-        const floorPlan = await this.floorPlanRepo.findOne({
+        const floorPlans = await this.floorPlanRepo.find({
           where: { floor: { id: f.id } },
           order: { uploadedAt: 'DESC' }
         });
-        (f as any).floorPlan = floorPlan || null;
+        (f as any).floorPlan = floorPlans[0] || null;
+        (f as any).allFloorPlans = floorPlans;
       }
       (b as any).floors = floors;
     }

@@ -11,6 +11,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -75,8 +76,11 @@ export class SalesController {
 
   // --- Reservations ---
   @Post('reservations')
-  createReservation(@Body() dto: CreateReservationDto) {
-    return this.service.createReservation(dto);
+  createReservation(@Body() dto: CreateReservationDto, @Req() req: any) {
+    const user = req.user;
+    const userId = user?.userId || 1;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.createReservation(dto, userId, username);
   }
 
   @Get('reservations')
@@ -95,8 +99,11 @@ export class SalesController {
   }
 
   @Put('reservations/:id/cancel')
-  cancelReservation(@Param('id') id: string) {
-    return this.service.cancelReservation(+id);
+  cancelReservation(@Param('id') id: string, @Req() req: any) {
+    const user = req.user;
+    const userId = user?.userId || 1;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.cancelReservation(+id, userId, username);
   }
 
   // --- Quotations ---
@@ -125,8 +132,11 @@ export class SalesController {
 
   // --- Reservations Conversion ---
   @Post('reservations/:id/convert-to-booking')
-  convertReservationToBooking(@Param('id') id: string, @Body() dto: ConvertReservationDto) {
-    return this.service.convertReservationToBooking(+id, dto);
+  convertReservationToBooking(@Param('id') id: string, @Body() dto: ConvertReservationDto, @Req() req: any) {
+    const user = req.user;
+    const userId = user?.userId || 1;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.convertReservationToBooking(+id, dto, userId, username);
   }
 
   // --- Bookings ---
@@ -146,18 +156,27 @@ export class SalesController {
   }
 
   @Put('bookings/:id/reject')
-  rejectBooking(@Param('id') id: string, @Body() dto: RejectBookingDto) {
-    return this.service.rejectBooking(+id, dto);
+  rejectBooking(@Param('id') id: string, @Body() dto: RejectBookingDto, @Req() req: any) {
+    const user = req.user;
+    const userId = user?.userId || 1;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.rejectBooking(+id, dto, userId, username);
   }
 
   @Put('bookings/:id/finance-review')
-  financeReviewBooking(@Param('id') id: string, @Body() dto: FinanceReviewBookingDto) {
-    return this.service.financeReviewBooking(+id, dto);
+  financeReviewBooking(@Param('id') id: string, @Body() dto: FinanceReviewBookingDto, @Req() req: any) {
+    const user = req.user;
+    const userId = user?.userId || 1;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.financeReviewBooking(+id, dto, userId, username);
   }
 
   @Put('bookings/:id/cancel')
-  cancelBooking(@Param('id') id: string, @Body() dto?: CancelBookingDto) {
-    return this.service.cancelBooking(+id, dto);
+  cancelBooking(@Param('id') id: string, @Body() dto: CancelBookingDto, @Req() req: any) {
+    const user = req.user;
+    const userId = user?.userId || 1;
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || 'System' : 'System';
+    return this.service.cancelBooking(+id, dto, userId, username);
   }
 
   // --- Agreements ---
