@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, DataSource } from 'typeorm';
 import { FinanceService } from '../../finance/services/finance.service';
 import { BrokerService } from '../../broker/services/broker.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
@@ -72,12 +72,12 @@ export class SalesService implements OnModuleInit {
       .then(() => this.logger.log('Initial reservation expiry sweep completed successfully.'))
       .catch((err) => this.logger.error('Failed to run initial reservation expiry sweep', err));
 
-    // Run Sweep every 12 hours
+    // Run Sweep every 30 seconds
     setInterval(() => {
       this.processExpiredReservations()
-        .then(() => this.logger.log('Periodic reservation expiry sweep completed successfully.'))
+        .then(() => {})
         .catch((err) => this.logger.error('Failed to run periodic reservation expiry sweep', err));
-    }, 12 * 60 * 60 * 1000);
+    }, 30 * 1000);
   }
 
   private async syncExistingStatuses() {
@@ -151,6 +151,7 @@ export class SalesService implements OnModuleInit {
     private readonly financeService: FinanceService,
     private readonly brokerService: BrokerService,
     private readonly notificationsService: NotificationsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // --- Customer CRUD & Conversion Workflow ---
@@ -396,27 +397,39 @@ export class SalesService implements OnModuleInit {
     return saved;
   }
 
-  async processExpiredReservations(): Promise<void> {
-    const today = new Date();
-    const expiredReservations = await this.reservationRepo.find({
+  async processExpiredReservations(): Promise<{ processedCount: number; expiredIds: number[] }> {
+    const now = new Date();
+    const activeReservations = await this.reservationRepo.find({
       where: [
         { status: 'RESERVED' },
         { status: 'Reserved' },
+        { status: 'CONFIRMED' },
+        { status: 'Confirmed' },
+        { status: 'ACTIVE' },
+        { status: 'Active' },
       ],
-      relations: { unit: { unitStatus: true } },
+      relations: { customer: true, property: true, unit: { unitStatus: true } },
     });
 
     const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Available' } });
+    const expiredIds: number[] = [];
 
-    for (const res of expiredReservations) {
-      if (new Date(res.expiryDate) < today) {
+    for (const res of activeReservations) {
+      if (!res.expiryDate) continue;
+      const expiry = new Date(res.expiryDate);
+
+      // Check if expiry date/time has arrived
+      if (expiry <= now) {
         try {
+          const oldValue = { ...res };
           res.status = 'EXPIRED';
           await this.reservationRepo.save(res);
+          expiredIds.push(res.id);
 
-          if (res.unit && availableStatus) {
+          // Revert linked unit to Available
+          if (res.unit) {
             const unit = await this.unitRepo.findOne({ where: { id: res.unit.id }, relations: { unitStatus: true } });
-            if (unit && unit.unitStatus && unit.unitStatus.statusName.toUpperCase() === 'RESERVED') {
+            if (unit && availableStatus && (!unit.unitStatus || unit.unitStatus.statusName !== 'Available')) {
               const oldStatus = unit.unitStatus;
               unit.unitStatus = availableStatus;
               unit.reservationExpiry = null;
@@ -433,14 +446,50 @@ export class SalesService implements OnModuleInit {
               await this.unitStatusHistoryRepo.save(history);
             }
           }
+
+          // Notify Customer of Expiration
+          try {
+            const customerEmail = res.customer?.primaryEmail;
+            const customerPhone = res.customer?.primaryPhone;
+            const customerName = res.customer?.fullName || 'Customer';
+
+            await this.notificationsService.sendNotification({
+              categoryCode: 'RESERVATION',
+              title: `Reservation Expired - #${res.reservationNo}`,
+              body: `Dear ${customerName},\nYour reservation #${res.reservationNo} for Unit ${res.unit?.unitCode || ''} at Property ${res.property?.propertyName || ''} has reached its expiry date and is now expired. The reserved unit has been returned to available inventory.`,
+              referenceTypeId: 'RESERVATION',
+              referenceId: res.id,
+              recipients: [
+                {
+                  recipientName: customerName,
+                  emailAddress: customerEmail || 'customer@ihsanproperties.com',
+                  phoneNumber: customerPhone || undefined,
+                }
+              ],
+            });
+            await this.notificationsService.processQueue();
+          } catch (notifErr) {
+            this.logger.error(`Failed to send expiration notification for reservation ${res.reservationNo}:`, notifErr);
+          }
+
+          await this.logAudit('SalesReservation', res.id, 'EXPIRE', oldValue, res);
         } catch (itemErr) {
           this.logger.error(`Error processing expired reservation ID ${res.id}:`, itemErr);
         }
       }
     }
+
+    if (expiredIds.length > 0) {
+      this.logger.log(`Sweeper expired ${expiredIds.length} reservation(s): [${expiredIds.join(', ')}]`);
+    }
+
+    return { processedCount: expiredIds.length, expiredIds };
   }
 
   async findAllReservations(): Promise<SalesReservation[]> {
+    await this.processExpiredReservations().catch((err) =>
+      this.logger.error('Error sweeping expired reservations on read:', err)
+    );
     return this.reservationRepo.find({ order: { createdAt: 'DESC' } });
   }
 
@@ -735,14 +784,32 @@ export class SalesService implements OnModuleInit {
 
     // Notify Sales Manager
     try {
+      const managers = await this.dataSource.query(
+        `SELECT u.userid as id, u.email, u.firstname, u.lastname, u.phonenumber
+         FROM rems_user u
+         INNER JOIN rems_user_role ur ON u.userid = ur.userid
+         INNER JOIN rems_role r ON ur.roleid = r.roleid
+         WHERE r.rolecode IN ('SALES_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+      );
+
+      const recipients = (managers && managers.length > 0)
+        ? managers.map((m: any) => ({
+            userId: Number(m.id),
+            recipientName: `${m.firstname || ''} ${m.lastname || ''}`.trim() || 'Sales Manager',
+            emailAddress: m.email || 'sales.mgr@ihsanrems.com',
+            phoneNumber: m.phonenumber || undefined,
+          }))
+        : [{ recipientName: 'Sales Manager', emailAddress: 'sales.mgr@ihsanrems.com' }];
+
       await this.notificationsService.sendNotification({
         categoryCode: 'BOOKING',
         title: `New Booking Pending Sales Approval - #${refNo}`,
-        body: `Booking #${refNo} for Unit ${reservation.unit?.unitCode} has been converted from Reservation #${reservation.reservationNo} and is awaiting Sales Manager approval.`,
+        body: `Booking #${refNo} for Unit ${reservation.unit?.unitCode || ''} has been converted from Reservation #${reservation.reservationNo} and is awaiting Sales Manager approval.`,
         referenceTypeId: 'BOOKING',
         referenceId: savedBooking.id,
-        recipients: [{ recipientName: 'Sales Manager', emailAddress: 'salesmgr@ihsanrems.com' }],
+        recipients,
       });
+      await this.notificationsService.processQueue();
     } catch (e) {
       this.logger.error('Failed to notify manager of converted booking', e);
     }
@@ -790,6 +857,38 @@ export class SalesService implements OnModuleInit {
       await this.reservationRepo.save(reservation);
     }
 
+    // Notify Sales Manager
+    try {
+      const managers = await this.dataSource.query(
+        `SELECT u.userid as id, u.email, u.firstname, u.lastname, u.phonenumber
+         FROM rems_user u
+         INNER JOIN rems_user_role ur ON u.userid = ur.userid
+         INNER JOIN rems_role r ON ur.roleid = r.roleid
+         WHERE r.rolecode IN ('SALES_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+      );
+
+      const recipients = (managers && managers.length > 0)
+        ? managers.map((m: any) => ({
+            userId: Number(m.id),
+            recipientName: `${m.firstname || ''} ${m.lastname || ''}`.trim() || 'Sales Manager',
+            emailAddress: m.email || 'sales.mgr@ihsanrems.com',
+            phoneNumber: m.phonenumber || undefined,
+          }))
+        : [{ recipientName: 'Sales Manager', emailAddress: 'sales.mgr@ihsanrems.com' }];
+
+      await this.notificationsService.sendNotification({
+        categoryCode: 'BOOKING',
+        title: `New Booking Pending Sales Approval - #${refNo}`,
+        body: `Booking #${refNo} for Unit ${unit.unitCode || ''} has been created and is awaiting Sales Manager approval.`,
+        referenceTypeId: 'BOOKING',
+        referenceId: savedBooking.id,
+        recipients,
+      });
+      await this.notificationsService.processQueue();
+    } catch (e) {
+      this.logger.error('Failed to notify manager of new booking', e);
+    }
+
     return savedBooking;
   }
 
@@ -818,14 +917,32 @@ export class SalesService implements OnModuleInit {
 
     // Notify Finance Department
     try {
+      const financeUsers = await this.dataSource.query(
+        `SELECT u.userid as id, u.email, u.firstname, u.lastname, u.phonenumber
+         FROM rems_user u
+         INNER JOIN rems_user_role ur ON u.userid = ur.userid
+         INNER JOIN rems_role r ON ur.roleid = r.roleid
+         WHERE r.rolecode IN ('FINANCE_MGR', 'FINANCE_OFFICER', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+      );
+
+      const recipients = (financeUsers && financeUsers.length > 0)
+        ? financeUsers.map((f: any) => ({
+            userId: Number(f.id),
+            recipientName: `${f.firstname || ''} ${f.lastname || ''}`.trim() || 'Finance Officer',
+            emailAddress: f.email || 'finance.officer@ihsanrems.com',
+            phoneNumber: f.phonenumber || undefined,
+          }))
+        : [{ recipientName: 'Finance Officer', emailAddress: 'finance.officer@ihsanrems.com' }];
+
       await this.notificationsService.sendNotification({
         categoryCode: 'FINANCE',
         title: `Booking #${booking.bookingNo} Awaiting Finance Approval`,
         body: `Booking #${booking.bookingNo} has been approved by Sales and is now pending Finance review and payment verification.`,
         referenceTypeId: 'BOOKING',
         referenceId: saved.id,
-        recipients: [{ recipientName: 'Finance Officer', emailAddress: 'finance@ihsanrems.com' }],
+        recipients,
       });
+      await this.notificationsService.processQueue();
     } catch (e) {
       this.logger.error('Failed to notify finance of booking approval', e);
     }

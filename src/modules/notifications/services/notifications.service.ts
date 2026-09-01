@@ -62,6 +62,9 @@ export class NotificationsService implements OnModuleInit {
         { code: 'FOLLOWUP', name: 'CRM & Lead Follow-ups' },
         { code: 'SYSTEM', name: 'System and Approvals Workflow' },
         { code: 'MARKETING', name: 'Quotation & Sales Marketing Notices' },
+        { code: 'BOOKING', name: 'Booking & Approval Management Alerts' },
+        { code: 'FINANCE', name: 'Finance Verification & Review Notices' },
+        { code: 'SALES', name: 'Sales Operations & Conversions' },
       ];
       for (const cat of categories) {
         const exists = await this.categoryRepo.findOne({ where: { categoryCode: cat.code } });

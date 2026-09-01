@@ -174,6 +174,7 @@ export class SecuritySeeder {
         code.startsWith('finance.') ||
         code.startsWith('sales.commissions.') ||
         code === 'sales.bookings.finance_review' ||
+        code === 'sales.bookings.read_all' ||
         code.startsWith('sales.contracts.') ||
         code.startsWith('sales.installments.') ||
         code.startsWith('property.'),
@@ -191,6 +192,7 @@ export class SecuritySeeder {
         code.startsWith('finance.reminders.') ||
         code.startsWith('finance.reports.') ||
         code === 'sales.bookings.finance_review' ||
+        code === 'sales.bookings.read_all' ||
         code === 'sales.commissions.read_all' ||
         code.startsWith('sales.installments.'),
       { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false, canExport: true }
