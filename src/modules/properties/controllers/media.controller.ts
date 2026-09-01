@@ -15,9 +15,9 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { MediaService } from '../services/media.service';
 
-const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt'];
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.webp'];
 const ALLOWED_MIME_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif', 
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
   'application/pdf', 'application/msword', 
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
   'application/vnd.ms-excel', 

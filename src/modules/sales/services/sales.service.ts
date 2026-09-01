@@ -67,6 +67,11 @@ export class SalesService implements OnModuleInit {
       .then(() => this.logger.log('Existing database statuses synced successfully.'))
       .catch((err) => this.logger.error('Failed to sync existing database statuses', err));
 
+    // Run startup sweep immediately
+    this.processExpiredReservations()
+      .then(() => this.logger.log('Initial reservation expiry sweep completed successfully.'))
+      .catch((err) => this.logger.error('Failed to run initial reservation expiry sweep', err));
+
     // Run Sweep every 12 hours
     setInterval(() => {
       this.processExpiredReservations()
@@ -232,7 +237,7 @@ export class SalesService implements OnModuleInit {
 
   // --- Reservation Management ---
 
-  async createReservation(dto: CreateReservationDto): Promise<SalesReservation> {
+  async createReservation(dto: CreateReservationDto, userId = 1, username = 'System'): Promise<SalesReservation> {
     const customer = await this.customerRepo.findOne({ where: { id: dto.customerId }, relations: { lead: { assignedSalesAgent: true } } });
     if (!customer) throw new NotFoundException('Customer not found');
 
@@ -276,6 +281,8 @@ export class SalesService implements OnModuleInit {
         oldStatus,
         newStatus: reservedStatus,
         reason: `Unit reserved ref: ${refNo}`,
+        changedBy: userId,
+        changedByName: username,
       });
       await this.unitStatusHistoryRepo.save(history);
     }
@@ -326,7 +333,10 @@ export class SalesService implements OnModuleInit {
   }
 
   async extendReservation(dto: ExtendReservationDto): Promise<SalesReservationExtension> {
-    const reservation = await this.reservationRepo.findOne({ where: { id: dto.reservationId } });
+    const reservation = await this.reservationRepo.findOne({
+      where: { id: dto.reservationId },
+      relations: { unit: true },
+    });
     if (!reservation) throw new NotFoundException('Reservation not found');
 
     const extension = this.extensionRepo.create({
@@ -352,7 +362,7 @@ export class SalesService implements OnModuleInit {
     return savedExtension;
   }
 
-  async cancelReservation(id: number): Promise<SalesReservation> {
+  async cancelReservation(id: number, userId = 1, username = 'System'): Promise<SalesReservation> {
     const reservation = await this.reservationRepo.findOne({ where: { id }, relations: { unit: true } });
     if (!reservation) throw new NotFoundException('Reservation not found');
 
@@ -375,6 +385,8 @@ export class SalesService implements OnModuleInit {
         oldStatus,
         newStatus: availableStatus,
         reason: `Reservation cancelled ref: ${reservation.reservationNo}`,
+        changedBy: userId,
+        changedByName: username,
       });
       await this.unitStatusHistoryRepo.save(history);
     }
@@ -387,33 +399,42 @@ export class SalesService implements OnModuleInit {
   async processExpiredReservations(): Promise<void> {
     const today = new Date();
     const expiredReservations = await this.reservationRepo.find({
-      where: { status: 'RESERVED' },
-      relations: { unit: true },
+      where: [
+        { status: 'RESERVED' },
+        { status: 'Reserved' },
+      ],
+      relations: { unit: { unitStatus: true } },
     });
 
     const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Available' } });
 
     for (const res of expiredReservations) {
       if (new Date(res.expiryDate) < today) {
-        res.status = 'EXPIRED';
-        await this.reservationRepo.save(res);
+        try {
+          res.status = 'EXPIRED';
+          await this.reservationRepo.save(res);
 
-        if (res.unit && availableStatus) {
-          const unit = await this.unitRepo.findOne({ where: { id: res.unit.id }, relations: { unitStatus: true } });
-          if (unit && unit.unitStatus.statusName === 'Reserved') {
-            const oldStatus = unit.unitStatus;
-            unit.unitStatus = availableStatus;
-            unit.reservationExpiry = null;
-            await this.unitRepo.save(unit);
+          if (res.unit && availableStatus) {
+            const unit = await this.unitRepo.findOne({ where: { id: res.unit.id }, relations: { unitStatus: true } });
+            if (unit && unit.unitStatus && unit.unitStatus.statusName.toUpperCase() === 'RESERVED') {
+              const oldStatus = unit.unitStatus;
+              unit.unitStatus = availableStatus;
+              unit.reservationExpiry = null;
+              await this.unitRepo.save(unit);
 
-            const history = this.unitStatusHistoryRepo.create({
-              unit,
-              oldStatus,
-              newStatus: availableStatus,
-              reason: `Reservation expired ref: ${res.reservationNo}`,
-            });
-            await this.unitStatusHistoryRepo.save(history);
+              const history = this.unitStatusHistoryRepo.create({
+                unit,
+                oldStatus,
+                newStatus: availableStatus,
+                reason: `Reservation expired ref: ${res.reservationNo}`,
+                changedBy: 1,
+                changedByName: 'System Sweeper',
+              });
+              await this.unitStatusHistoryRepo.save(history);
+            }
           }
+        } catch (itemErr) {
+          this.logger.error(`Error processing expired reservation ID ${res.id}:`, itemErr);
         }
       }
     }
@@ -656,7 +677,7 @@ export class SalesService implements OnModuleInit {
 
   // --- Booking Management ---
 
-  async convertReservationToBooking(reservationId: number, dto: ConvertReservationDto): Promise<SalesBooking> {
+  async convertReservationToBooking(reservationId: number, dto: ConvertReservationDto, userId = 1, username = 'System'): Promise<SalesBooking> {
     const reservation = await this.reservationRepo.findOne({
       where: { id: reservationId },
       relations: { customer: true, property: true, unit: true },
@@ -704,6 +725,8 @@ export class SalesService implements OnModuleInit {
         oldStatus,
         newStatus: bookedStatus,
         reason: `Reservation converted to Booking ref: ${refNo}`,
+        changedBy: userId,
+        changedByName: username,
       });
       await this.unitStatusHistoryRepo.save(history);
     }
@@ -810,7 +833,7 @@ export class SalesService implements OnModuleInit {
     return saved;
   }
 
-  async financeReviewBooking(id: number, dto: FinanceReviewBookingDto): Promise<SalesBooking> {
+  async financeReviewBooking(id: number, dto: FinanceReviewBookingDto, userId = 1, username = 'System'): Promise<SalesBooking> {
     const booking = await this.bookingRepo.findOne({
       where: { id },
       relations: { unit: true, quotation: true, customer: true, property: true },
@@ -837,7 +860,7 @@ export class SalesService implements OnModuleInit {
       // Transition unit to Sold
       const soldStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Sold' } });
       const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
-      if (unit && soldStatus) {
+      if (unit && soldStatus && (!unit.unitStatus || unit.unitStatus.statusName !== 'Sold')) {
         const oldStatus = unit.unitStatus;
         unit.unitStatus = soldStatus;
         unit.reservationExpiry = null;
@@ -849,6 +872,8 @@ export class SalesService implements OnModuleInit {
           oldStatus,
           newStatus: soldStatus,
           reason: `Booking final finance approved ref: ${booking.bookingNo}`,
+          changedBy: userId,
+          changedByName: username,
         });
         await this.unitStatusHistoryRepo.save(history);
       }
@@ -874,7 +899,7 @@ export class SalesService implements OnModuleInit {
       // Revert unit to Available
       const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Available' } });
       const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
-      if (unit && availableStatus) {
+      if (unit && availableStatus && (!unit.unitStatus || unit.unitStatus.statusName !== 'Available')) {
         const oldStatus = unit.unitStatus;
         unit.unitStatus = availableStatus;
         unit.soldDate = null;
@@ -885,6 +910,8 @@ export class SalesService implements OnModuleInit {
           oldStatus,
           newStatus: availableStatus,
           reason: `Booking finance rejected ref: ${booking.bookingNo}. Reason: ${dto.comment || 'Finance rejected'}`,
+          changedBy: userId,
+          changedByName: username,
         });
         await this.unitStatusHistoryRepo.save(history);
       }
@@ -895,7 +922,7 @@ export class SalesService implements OnModuleInit {
     }
   }
 
-  async rejectBooking(id: number, dto: RejectBookingDto): Promise<SalesBooking> {
+  async rejectBooking(id: number, dto: RejectBookingDto, userId = 1, username = 'System'): Promise<SalesBooking> {
     if (!dto.rejectionReason || !dto.rejectionReason.trim()) {
       throw new BadRequestException('Rejection reason is mandatory.');
     }
@@ -916,7 +943,7 @@ export class SalesService implements OnModuleInit {
     // Revert unit to Available
     const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Available' } });
     const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
-    if (unit && availableStatus) {
+    if (unit && availableStatus && (!unit.unitStatus || unit.unitStatus.statusName !== 'Available')) {
       const oldStatus = unit.unitStatus;
       unit.unitStatus = availableStatus;
       unit.soldDate = null;
@@ -927,6 +954,8 @@ export class SalesService implements OnModuleInit {
         oldStatus,
         newStatus: availableStatus,
         reason: `Booking rejected ref: ${booking.bookingNo}. Reason: ${dto.rejectionReason}`,
+        changedBy: userId,
+        changedByName: username,
       });
       await this.unitStatusHistoryRepo.save(history);
     }
@@ -936,7 +965,7 @@ export class SalesService implements OnModuleInit {
     return saved;
   }
 
-  async cancelBooking(id: number, dto?: CancelBookingDto): Promise<SalesBooking> {
+  async cancelBooking(id: number, dto?: CancelBookingDto, userId = 1, username = 'System'): Promise<SalesBooking> {
     const booking = await this.bookingRepo.findOne({ where: { id }, relations: { unit: true } });
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -951,7 +980,7 @@ export class SalesService implements OnModuleInit {
     // Return unit to Available
     const availableStatus = await this.unitStatusRepo.findOne({ where: { statusName: 'Available' } });
     const unit = await this.unitRepo.findOne({ where: { id: booking.unit.id }, relations: { unitStatus: true } });
-    if (unit && availableStatus) {
+    if (unit && availableStatus && (!unit.unitStatus || unit.unitStatus.statusName !== 'Available')) {
       const oldStatus = unit.unitStatus;
       unit.unitStatus = availableStatus;
       unit.soldDate = null;
@@ -962,6 +991,8 @@ export class SalesService implements OnModuleInit {
         oldStatus,
         newStatus: availableStatus,
         reason: `Booking cancelled ref: ${booking.bookingNo}. Reason: ${booking.cancellationReason || 'Client cancellation'}`,
+        changedBy: userId,
+        changedByName: username,
       });
       await this.unitStatusHistoryRepo.save(history);
     }
@@ -972,7 +1003,10 @@ export class SalesService implements OnModuleInit {
   }
 
   async findAllBookings(): Promise<SalesBooking[]> {
-    return this.bookingRepo.find({ order: { bookingDate: 'DESC' } });
+    return this.bookingRepo.find({
+      relations: { reservation: true, quotation: true },
+      order: { bookingDate: 'DESC' },
+    });
   }
 
   // --- Agreement & Contract Management ---
