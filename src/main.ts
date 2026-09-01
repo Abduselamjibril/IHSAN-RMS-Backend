@@ -45,7 +45,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // Throttle high-risk authentication and integration operations, plus general API traffic.
-  app.use('/api/auth/login', createRateLimiter(5, 15 * 60 * 1000));
+  app.use('/api/auth/login', createRateLimiter(50, 15 * 60 * 1000));
   app.use('/api/notifications/telegram', createRateLimiter(5, 15 * 60 * 1000));
   app.use('/api', createRateLimiter(300, 15 * 60 * 1000));
 

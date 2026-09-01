@@ -197,40 +197,45 @@ export class OpportunityService {
   }
 
   async updateStage(id: number, stageId: number): Promise<Opportunity> {
+    const numStageId = Number(stageId);
     const opp = await this.opportunityRepo.findOne({
-      where: { id, isDeleted: false },
+      where: { id: +id, isDeleted: false },
       relations: { opportunityStage: true },
     });
     if (!opp) {
       throw new NotFoundException(`Opportunity with ID ${id} not found`);
     }
 
-    const stage = await this.stageRepo.findOne({ where: { id: stageId } });
+    const stage = await this.stageRepo.findOne({ where: { id: numStageId } });
     if (!stage) {
-      throw new NotFoundException(`Opportunity Stage with ID ${stageId} not found`);
+      throw new NotFoundException(`Opportunity Stage with ID ${numStageId} not found`);
     }
 
     const prevStageName = opp.opportunityStage ? opp.opportunityStage.stageName : 'Unknown';
+    const isWon = stage.isClosed ? (stage.probabilityPercent >= 100 || stage.stageName.toLowerCase().includes('won')) : false;
+    const isLost = stage.isClosed ? (stage.stageName.toLowerCase().includes('lost') || stage.probabilityPercent === 0) : false;
+
     opp.opportunityStage = stage;
     opp.probabilityPercent = Number(stage.probabilityPercent);
-
-    if (stage.isClosed) {
-      opp.actualCloseDate = new Date();
-      if (stage.probabilityPercent >= 100 || stage.stageName === 'Closed Won') {
-        opp.isWon = true;
-        opp.isLost = false;
-      } else {
-        opp.isLost = true;
-        opp.isWon = false;
-      }
-    } else {
-      opp.isWon = false;
-      opp.isLost = false;
-      opp.actualCloseDate = null;
-      opp.lossReason = null;
-    }
+    opp.isWon = isWon;
+    opp.isLost = isLost;
+    opp.actualCloseDate = stage.isClosed ? new Date() : null;
+    opp.lossReason = isLost ? opp.lossReason : null;
 
     const saved = await this.opportunityRepo.save(opp);
+
+    await this.opportunityRepo.createQueryBuilder()
+      .update(Opportunity)
+      .set({
+        opportunityStage: stage,
+        probabilityPercent: Number(stage.probabilityPercent),
+        isWon,
+        isLost,
+        actualCloseDate: stage.isClosed ? new Date() : null,
+        lossReason: isLost ? opp.lossReason : null,
+      })
+      .where('id = :id', { id: +id })
+      .execute();
 
     // Create activity audit
     const act = new OpportunityActivity();
@@ -241,7 +246,7 @@ export class OpportunityService {
     act.description = `Pipeline stage transitioned from "${prevStageName}" to "${stage.stageName}"`;
     await this.activityRepo.save(act);
 
-    return saved;
+    return this.findOne(id);
   }
 
   async closeLost(id: number, reasonId: number, remarks?: string): Promise<Opportunity> {

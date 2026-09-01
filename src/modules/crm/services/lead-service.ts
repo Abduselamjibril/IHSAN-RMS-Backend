@@ -13,6 +13,7 @@ import { Communication } from '../entities/communication.entity';
 import { CommunicationAttachment } from '../entities/communication-attachment.entity';
 import { CommunicationAudit } from '../entities/communication-audit.entity';
 import { Opportunity } from '../entities/opportunity.entity';
+import { CustomerTag } from '../entities/customer-tag.entity';
 import { NotificationService } from './notification.service';
 import { DocumentService } from './document.service';
 import { CreateLeadDto } from '../dto/create-lead.dto';
@@ -22,11 +23,12 @@ export function parseDatePreservingLocal(dateVal: any): Date {
   if (!dateVal) return new Date();
   if (dateVal instanceof Date) return dateVal;
   const str = String(dateVal).trim();
-  if (str.includes('T') && !str.endsWith('Z') && !str.includes('+')) {
-    const [datePart, timePart] = str.split('T');
+  if (str.includes('T')) {
+    const [datePart, timeWithOffset] = str.split('T');
+    const timePart = timeWithOffset.split('Z')[0].split('+')[0];
     const [year, month, day] = datePart.split('-').map(Number);
     const timeParts = timePart.split(':').map(Number);
-    return new Date(year, month - 1, day, timeParts[0] || 0, timeParts[1] || 0, timeParts[2] || 0);
+    return new Date(Date.UTC(year, month - 1, day, timeParts[0] || 0, timeParts[1] || 0, timeParts[2] || 0));
   }
   return new Date(dateVal);
 }
@@ -56,6 +58,8 @@ export class LeadService {
     private readonly commAuditRepo: Repository<CommunicationAudit>,
     @InjectRepository(Opportunity)
     private readonly opportunityRepo: Repository<Opportunity>,
+    @InjectRepository(CustomerTag)
+    private readonly tagRepo: Repository<CustomerTag>,
     private readonly notificationService: NotificationService,
     private readonly documentService: DocumentService,
   ) { }
@@ -204,6 +208,7 @@ export class LeadService {
       .leftJoinAndSelect('lead.leadSource', 'leadSource')
       .leftJoinAndSelect('lead.leadStatus', 'leadStatus')
       .leftJoinAndSelect('lead.assignedSalesAgent', 'assignedSalesAgent')
+      .leftJoinAndSelect('lead.tags', 'tags')
       .where('lead.isDeleted = :isDeleted', { isDeleted: false });
 
     // Filter by search string
@@ -278,6 +283,7 @@ export class LeadService {
         leadStatus: true,
         assignedSalesAgent: true,
         duplicateOfLead: true,
+        tags: true,
       },
     });
 
@@ -448,6 +454,27 @@ export class LeadService {
       }
     }
 
+    // Resolve Tags
+    if ((updateLeadDto as any).tags !== undefined) {
+      const tagInput = (updateLeadDto as any).tags;
+      const tagNames: string[] = Array.isArray(tagInput)
+        ? tagInput.map(t => typeof t === 'string' ? t.trim() : (t?.tagName || String(t))).filter(Boolean)
+        : [];
+      
+      const tagEntities: CustomerTag[] = [];
+      for (const name of tagNames) {
+        let tag = await this.tagRepo.findOne({ where: { tagName: name } });
+        if (!tag) {
+          tag = new CustomerTag();
+          tag.tagName = name;
+          tag.colorCode = '#4338ca';
+          tag = await this.tagRepo.save(tag);
+        }
+        tagEntities.push(tag);
+      }
+      lead.tags = tagEntities;
+    }
+
     const savedLead = await this.leadRepo.save(lead);
 
     // Log status transition activity if changed
@@ -550,27 +577,44 @@ export class LeadService {
     const act = new LeadActivity();
     act.lead = lead;
     act.activityType = dto.activityType || 'Call';
-    act.activityDate = dto.activityDate || new Date();
+    act.activityDate = dto.activityDate ? parseDatePreservingLocal(dto.activityDate) : new Date();
     act.subject = dto.subject || 'Interaction logged';
     act.description = dto.description as any;
     act.performedBy = dto.performedBy as any;
     act.outcome = dto.outcome as any;
-    act.nextActionDate = dto.nextActionDate as any;
 
-    const savedAct = await this.leadActivityRepo.save(act);
-
-    // Also update lastContactedAt on the lead
-    lead.lastContactedAt = new Date();
     if (dto.nextActionDate) {
       const followupDate = parseDatePreservingLocal(dto.nextActionDate);
       act.nextActionDate = followupDate;
       lead.nextFollowupAt = followupDate;
+    }
 
+    const savedAct = await this.leadActivityRepo.save(act);
+
+    // Save to Communication repository so it appears on unified Communications Timeline & filters (TC-2.16)
+    try {
+      const comm = new Communication();
+      comm.lead = lead;
+      comm.subject = dto.subject || `${dto.activityType} logged`;
+      comm.messageBody = dto.description as any;
+      comm.communicationDatetime = act.activityDate;
+      comm.communicationDirection = dto.direction || 'Outbound';
+      comm.communicationStatus = dto.activityType || 'Call';
+      comm.durationSeconds = dto.durationMinutes ? (dto.durationMinutes * 60) : null as any;
+      comm.externalReference = dto.location ? `Location: ${dto.location}` : (dto.attendees ? `Attendees: ${dto.attendees}` : '');
+      await this.communicationRepo.save(comm);
+    } catch (e) {
+      console.error('Error saving communication timeline record:', e);
+    }
+
+    // Also update lastContactedAt on the lead
+    lead.lastContactedAt = new Date();
+    if (dto.nextActionDate && act.nextActionDate) {
       // Also create a FollowupReminder record
       await this.notificationService.createReminder(
         lead,
         lead.assignedSalesAgent,
-        followupDate,
+        act.nextActionDate,
         `Follow-up: ${dto.subject || 'Interaction logged'}`,
         `Scheduled follow-up reminder for lead ${lead.fullName}. Notes: ${dto.description || ''}`
       );

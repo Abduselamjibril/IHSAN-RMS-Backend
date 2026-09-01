@@ -21,5 +21,17 @@ export class AddActivityDto {
 
   @ApiPropertyOptional({ example: '2026-06-05T09:00:00Z', description: 'Scheduled next action date' })
   nextActionDate?: Date;
+
+  @ApiPropertyOptional({ example: 'Head Office', description: 'Location of meeting or site visit' })
+  location?: string;
+
+  @ApiPropertyOptional({ example: 'John, Abel', description: 'Attendees' })
+  attendees?: string;
+
+  @ApiPropertyOptional({ example: 'Outbound', description: 'Call direction' })
+  direction?: string;
+
+  @ApiPropertyOptional({ example: 15, description: 'Duration in minutes' })
+  durationMinutes?: number;
 }
 

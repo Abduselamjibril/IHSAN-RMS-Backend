@@ -63,17 +63,9 @@ export class OpportunityController {
 
   @Put(':id/stage')
   @ApiParam({ name: 'id', description: 'Opportunity ID' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        stageId: { type: 'number', example: 2 },
-      },
-      required: ['stageId'],
-    },
-  })
   @ApiOperation({ summary: 'Change the pipeline stage of an opportunity' })
-  async updateStage(@Param('id') id: string, @Body('stageId') stageId: number) {
+  async updateStage(@Param('id') id: string, @Body() body: any) {
+    const stageId = Number(body?.stageId ?? body?.id ?? body);
     return this.opportunityService.updateStage(+id, stageId);
   }
 
