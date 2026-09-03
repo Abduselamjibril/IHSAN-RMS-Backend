@@ -130,18 +130,21 @@ export class SegmentationService {
     segment.rules.forEach((rule, idx) => {
       const paramName = `rule_val_${idx}`;
       let dbField = '';
+      const isValNumeric = !isNaN(Number(rule.value)) && String(rule.value).trim() !== '';
 
       // Map dynamic fields
-      if (rule.fieldName === 'statusId' || rule.fieldName === 'status') {
-        dbField = 'leadStatus.id';
-      } else if (rule.fieldName === 'statusName') {
-        dbField = 'leadStatus.statusName';
-      } else if (rule.fieldName === 'sourceId') {
-        dbField = 'leadSource.id';
-      } else if (rule.fieldName === 'agentId') {
-        dbField = 'assignedSalesAgent.id';
+      if (rule.fieldName === 'statusId' || rule.fieldName === 'status' || rule.fieldName === 'statusName') {
+        dbField = isValNumeric ? 'leadStatus.id' : 'leadStatus.statusName';
+      } else if (rule.fieldName === 'sourceId' || rule.fieldName === 'source') {
+        dbField = isValNumeric ? 'leadSource.id' : 'leadSource.sourceName';
+      } else if (rule.fieldName === 'agentId' || rule.fieldName === 'agent') {
+        dbField = isValNumeric ? 'assignedSalesAgent.id' : 'assignedSalesAgent.fullName';
       } else if (rule.fieldName === 'interestedPropertyType' || rule.fieldName === 'interestedIn') {
         dbField = 'lead.interestedPropertyType';
+      } else if (rule.fieldName === 'budget' || rule.fieldName === 'budgetMin') {
+        dbField = rule.operator === '>' || rule.operator === '>=' ? 'lead.budgetMax' : 'lead.budgetMin';
+      } else if (rule.fieldName === 'budgetMax') {
+        dbField = 'lead.budgetMax';
       } else {
         dbField = `lead.${rule.fieldName}`;
       }
@@ -153,7 +156,11 @@ export class SegmentationService {
         const arrayValues = rule.value.split(',').map(v => v.trim());
         qb.andWhere(`${dbField} IN (:...${paramName})`, { [paramName]: arrayValues });
       } else if (rule.operator === '=') {
-        qb.andWhere(`${dbField} = :${paramName}`, { [paramName]: rule.value });
+        if (!isValNumeric && (rule.fieldName === 'interestedPropertyType' || rule.fieldName === 'interestedIn' || rule.fieldName === 'status' || rule.fieldName === 'statusName')) {
+          qb.andWhere(`${dbField} ILIKE :${paramName}`, { [paramName]: `%${rule.value}%` });
+        } else {
+          qb.andWhere(`${dbField} = :${paramName}`, { [paramName]: rule.value });
+        }
       } else if (rule.operator === '!=') {
         qb.andWhere(`${dbField} != :${paramName}`, { [paramName]: rule.value });
       } else if (rule.operator === '>') {
@@ -175,6 +182,17 @@ export class SegmentationService {
 
     // Refresh return
     return this.findOneSegment(saved.id);
+  }
+
+  async recalculateAllSegments(): Promise<void> {
+    const segments = await this.segmentRepo.find({ where: { isActive: true }, select: { id: true } });
+    for (const s of segments) {
+      try {
+        await this.recalculateSegment(s.id);
+      } catch (err) {
+        console.error(`[AUTO-SEGMENTATION] Failed to recalculate segment ID ${s.id}:`, err);
+      }
+    }
   }
 
   // ================= Segment Metrics Report =================

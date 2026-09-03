@@ -16,6 +16,7 @@ import { Opportunity } from '../entities/opportunity.entity';
 import { CustomerTag } from '../entities/customer-tag.entity';
 import { NotificationService } from './notification.service';
 import { DocumentService } from './document.service';
+import { SegmentationService } from './segmentation.service';
 import { CreateLeadDto } from '../dto/create-lead.dto';
 import { UpdateLeadDto } from '../dto/update-lead.dto';
 import { AddActivityDto } from '../dto/add-activity.dto';
@@ -62,6 +63,7 @@ export class LeadService {
     private readonly tagRepo: Repository<CustomerTag>,
     private readonly notificationService: NotificationService,
     private readonly documentService: DocumentService,
+    private readonly segmentationService: SegmentationService,
   ) { }
 
   async create(createLeadDto: CreateLeadDto): Promise<Lead> {
@@ -195,6 +197,11 @@ export class LeadService {
     if (lead.assignedSalesAgent) {
       await this.notificationService.triggerAssignmentNotification(savedLead, lead.assignedSalesAgent);
     }
+
+    // Auto-recalculate segments asynchronously
+    this.segmentationService.recalculateAllSegments().catch(err => {
+      console.error('[AUTO-SEGMENTATION] Error recalculating segments on lead creation:', err);
+    });
 
     return savedLead;
   }
@@ -504,6 +511,11 @@ export class LeadService {
         await this.leadActivityRepo.save(act);
       }
     }
+
+    // Auto-recalculate segments asynchronously
+    this.segmentationService.recalculateAllSegments().catch(err => {
+      console.error('[AUTO-SEGMENTATION] Error recalculating segments on lead update:', err);
+    });
 
     return savedLead;
   }
