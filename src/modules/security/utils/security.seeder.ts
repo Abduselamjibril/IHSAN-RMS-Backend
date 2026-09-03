@@ -181,7 +181,7 @@ export class SecuritySeeder {
       { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true }
     );
 
-    // FINANCE_OFFICER (Finance Officer): Collections, Payments, Receipts, Due-Date Reminders, Statements, Aging
+    // FINANCE_OFFICER (Finance Officer): Collections, Payments, Receipts, Due-Date Reminders, Statements, Aging, Commission Review, Booking Approvals
     await assignRolePermissions(
       'FINANCE_OFFICER',
       (code) =>
@@ -193,9 +193,9 @@ export class SecuritySeeder {
         code.startsWith('finance.reports.') ||
         code === 'sales.bookings.finance_review' ||
         code === 'sales.bookings.read_all' ||
-        code === 'sales.commissions.read_all' ||
+        code.startsWith('sales.commissions.') ||
         code.startsWith('sales.installments.'),
-      { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false, canExport: true }
+      { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: true, canExport: true }
     );
 
     // INV_MGR (Inventory Manager): full Property & Unit Inventory & Price Approvals

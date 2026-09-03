@@ -2668,6 +2668,14 @@ export const SEEDED_PERMISSIONS: SeededPermission[] = [
     path: '/api/sales/commissions/analytics',
   },
   {
+    name: 'sales.commissions.review',
+    description: 'Finance review & approval/rejection for commission payout (TC-5.35)',
+    module: 'Sales',
+    controller: 'SalesController',
+    method: 'PUT',
+    path: '/api/sales/commissions/:id/review',
+  },
+  {
     name: 'sales.commissions.approve',
     description: 'Finance review & approval for commission payout (TC-5.35)',
     module: 'Sales',

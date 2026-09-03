@@ -384,9 +384,11 @@ export class NotificationsService implements OnModuleInit {
         }
 
         if (sent) {
-          recipient.deliveryStatus = 'SENT';
-          recipient.deliveredDate = new Date();
-          await this.recipientRepo.save(recipient);
+          if (recipient.deliveryStatus !== 'READ') {
+            recipient.deliveryStatus = 'SENT';
+            recipient.deliveredDate = new Date();
+            await this.recipientRepo.save(recipient);
+          }
 
           // Log Delivery Successful
           await this.deliveryLogRepo.save(
@@ -400,6 +402,12 @@ export class NotificationsService implements OnModuleInit {
           );
         } else {
           overallSuccess = false;
+          // Only set recipient to FAILED if not already marked SENT or READ by other channels
+          if (recipient.deliveryStatus === 'PENDING') {
+            recipient.deliveryStatus = 'FAILED';
+            await this.recipientRepo.save(recipient);
+          }
+
           // Log Delivery Failure
           await this.deliveryLogRepo.save(
             this.deliveryLogRepo.create({
@@ -530,7 +538,10 @@ export class NotificationsService implements OnModuleInit {
 
   async getUnreadCount(userId: number): Promise<number> {
     return this.recipientRepo.count({
-      where: { userId, deliveryStatus: 'SENT' }, // SENT means delivered to inbox but not read
+      where: [
+        { userId, deliveryStatus: 'SENT' },
+        { userId, deliveryStatus: 'PENDING' },
+      ],
     });
   }
 

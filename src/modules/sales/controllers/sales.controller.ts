@@ -382,8 +382,33 @@ export class SalesController {
   reviewCommission(
     @Param('id') id: string,
     @Body() dto: ReviewCommissionDto,
+    @Req() req: any,
   ) {
-    return this.service.reviewCommission(+id, dto.action, dto.remarks, dto.reviewerId);
+    const user = req.user;
+    const reviewerId = user?.userId || dto.reviewerId || 1;
+    return this.service.reviewCommission(+id, dto.action, dto.remarks, reviewerId);
+  }
+
+  @Put('commissions/:id/approve')
+  approveCommission(
+    @Param('id') id: string,
+    @Body() dto: { remarks?: string },
+    @Req() req: any,
+  ) {
+    const user = req.user;
+    const reviewerId = user?.userId || 1;
+    return this.service.reviewCommission(+id, 'APPROVE', dto?.remarks, reviewerId);
+  }
+
+  @Put('commissions/:id/reject')
+  rejectCommission(
+    @Param('id') id: string,
+    @Body() dto: { remarks?: string },
+    @Req() req: any,
+  ) {
+    const user = req.user;
+    const reviewerId = user?.userId || 1;
+    return this.service.reviewCommission(+id, 'REJECT', dto?.remarks, reviewerId);
   }
 
   @Post('commissions/calculate/:contractId')

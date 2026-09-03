@@ -785,11 +785,11 @@ export class SalesService implements OnModuleInit {
     // Notify Sales Manager
     try {
       const managers = await this.dataSource.query(
-        `SELECT u.userid as id, u.email, u.firstname, u.lastname, u.phonenumber
+        `SELECT DISTINCT u.userid as id, u.emailaddress as email, u.firstname, u.lastname, u.phonenumber
          FROM rems_user u
          INNER JOIN rems_user_role ur ON u.userid = ur.userid
          INNER JOIN rems_role r ON ur.roleid = r.roleid
-         WHERE r.rolecode IN ('SALES_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+         WHERE r.rolecode IN ('SALES_MGR', 'GENERAL_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
       );
 
       const recipients = (managers && managers.length > 0)
@@ -860,11 +860,11 @@ export class SalesService implements OnModuleInit {
     // Notify Sales Manager
     try {
       const managers = await this.dataSource.query(
-        `SELECT u.userid as id, u.email, u.firstname, u.lastname, u.phonenumber
+        `SELECT DISTINCT u.userid as id, u.emailaddress as email, u.firstname, u.lastname, u.phonenumber
          FROM rems_user u
          INNER JOIN rems_user_role ur ON u.userid = ur.userid
          INNER JOIN rems_role r ON ur.roleid = r.roleid
-         WHERE r.rolecode IN ('SALES_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+         WHERE r.rolecode IN ('SALES_MGR', 'GENERAL_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
       );
 
       const recipients = (managers && managers.length > 0)
@@ -918,7 +918,7 @@ export class SalesService implements OnModuleInit {
     // Notify Finance Department
     try {
       const financeUsers = await this.dataSource.query(
-        `SELECT u.userid as id, u.email, u.firstname, u.lastname, u.phonenumber
+        `SELECT DISTINCT u.userid as id, u.emailaddress as email, u.firstname, u.lastname, u.phonenumber
          FROM rems_user u
          INNER JOIN rems_user_role ur ON u.userid = ur.userid
          INNER JOIN rems_role r ON ur.roleid = r.roleid
@@ -1003,6 +1003,46 @@ export class SalesService implements OnModuleInit {
         this.logger.error('Failed to trigger broker booking approved event', e);
       }
 
+      // Notify GM / Executives, Sales Manager, and Customer of Final Finance Approval
+      try {
+        const mgmtUsers = await this.dataSource.query(
+          `SELECT DISTINCT u.userid as id, u.emailaddress as email, u.firstname, u.lastname, u.phonenumber
+           FROM rems_user u
+           INNER JOIN rems_user_role ur ON u.userid = ur.userid
+           INNER JOIN rems_role r ON ur.roleid = r.roleid
+           WHERE r.rolecode IN ('EXEC', 'GENERAL_MGR', 'SALES_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+        );
+
+        const recipients = (mgmtUsers && mgmtUsers.length > 0)
+          ? mgmtUsers.map((m: any) => ({
+              userId: Number(m.id),
+              recipientName: `${m.firstname || ''} ${m.lastname || ''}`.trim() || 'Manager',
+              emailAddress: m.email || undefined,
+              phoneNumber: m.phonenumber || undefined,
+            }))
+          : [];
+
+        if (booking.customer) {
+          recipients.push({
+            recipientName: booking.customer.fullName || 'Customer',
+            emailAddress: booking.customer.primaryEmail || 'customer@ihsanproperties.com',
+            phoneNumber: booking.customer.primaryPhone || undefined,
+          });
+        }
+
+        await this.notificationsService.sendNotification({
+          categoryCode: 'FINANCE',
+          title: `Booking #${booking.bookingNo} - Final Approval & Payment Clearance`,
+          body: `Booking #${booking.bookingNo} for Unit ${booking.unit?.unitCode || ''} at Property ${booking.property?.propertyName || ''} has received final Finance approval. Payment verified: "${booking.financeComment}". Unit status is now locked as SOLD.`,
+          referenceTypeId: 'BOOKING',
+          referenceId: saved.id,
+          recipients,
+        });
+        await this.notificationsService.processQueue();
+      } catch (notifErr) {
+        this.logger.error(`Failed to send finance approval notification for booking ${booking.bookingNo}:`, notifErr);
+      }
+
       return saved;
     } else {
       // Finance rejects
@@ -1034,6 +1074,46 @@ export class SalesService implements OnModuleInit {
       }
 
       await this.logAudit('SalesBooking', saved.id, 'FINANCE_REJECT', oldValue, saved);
+
+      // Notify Sales Manager and Customer of Finance Rejection
+      try {
+        const salesManagers = await this.dataSource.query(
+          `SELECT DISTINCT u.userid as id, u.emailaddress as email, u.firstname, u.lastname, u.phonenumber
+           FROM rems_user u
+           INNER JOIN rems_user_role ur ON u.userid = ur.userid
+           INNER JOIN rems_role r ON ur.roleid = r.roleid
+           WHERE r.rolecode IN ('SALES_MGR', 'GENERAL_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+        );
+
+        const recipients = (salesManagers && salesManagers.length > 0)
+          ? salesManagers.map((m: any) => ({
+              userId: Number(m.id),
+              recipientName: `${m.firstname || ''} ${m.lastname || ''}`.trim() || 'Sales Manager',
+              emailAddress: m.email || undefined,
+              phoneNumber: m.phonenumber || undefined,
+            }))
+          : [];
+
+        if (booking.customer) {
+          recipients.push({
+            recipientName: booking.customer.fullName || 'Customer',
+            emailAddress: booking.customer.primaryEmail || 'customer@ihsanproperties.com',
+            phoneNumber: booking.customer.primaryPhone || undefined,
+          });
+        }
+
+        await this.notificationsService.sendNotification({
+          categoryCode: 'FINANCE',
+          title: `Booking #${booking.bookingNo} - Finance Review Rejected`,
+          body: `Booking #${booking.bookingNo} for Unit ${booking.unit?.unitCode || ''} was rejected by Finance. Reason: "${dto.comment || 'Finance verification failed'}". Unit has been returned to available inventory.`,
+          referenceTypeId: 'BOOKING',
+          referenceId: saved.id,
+          recipients,
+        });
+        await this.notificationsService.processQueue();
+      } catch (notifErr) {
+        this.logger.error(`Failed to send finance rejection notification for booking ${booking.bookingNo}:`, notifErr);
+      }
 
       return saved;
     }
@@ -1832,6 +1912,46 @@ export class SalesService implements OnModuleInit {
       reviewerId: reviewerId || 1,
       reviewedAt: new Date(),
     });
+
+    // Send notifications to Sales Representative and Sales Managers
+    try {
+      const managers = await this.dataSource.query(
+        `SELECT DISTINCT u.userid as id, u.emailaddress as email, u.firstname, u.lastname, u.phonenumber
+         FROM rems_user u
+         INNER JOIN rems_user_role ur ON u.userid = ur.userid
+         INNER JOIN rems_role r ON ur.roleid = r.roleid
+         WHERE r.rolecode IN ('SALES_MGR', 'GENERAL_MGR', 'FINANCE_MGR', 'SYS_ADMIN') AND u.isactive = true AND ur.isactive = true`
+      );
+
+      const recipients = (managers && managers.length > 0)
+        ? managers.map((m: any) => ({
+            userId: Number(m.id),
+            recipientName: `${m.firstname || ''} ${m.lastname || ''}`.trim() || 'Manager',
+            emailAddress: m.email || undefined,
+            phoneNumber: m.phonenumber || undefined,
+          }))
+        : [];
+
+      if (commission.salesRep) {
+        recipients.push({
+          recipientName: commission.salesRep.fullName || 'Sales Agent',
+          emailAddress: commission.salesRep.email || 'sales.agent@ihsanproperties.com',
+          phoneNumber: commission.salesRep.phone || undefined,
+        });
+      }
+
+      await this.notificationsService.sendNotification({
+        categoryCode: 'FINANCE',
+        title: `Sales Commission #${commission.id} ${commission.status === 'APPROVED' ? 'Approved for Payout' : 'Rejected'}`,
+        body: `Commission #${commission.id} (ETB ${commission.commissionAmount}) for Contract ${commission.contract?.contractNo || ''} has been ${commission.status.toLowerCase()} by Finance. Remarks: "${remarks || 'Approved by Finance Officer'}".`,
+        referenceTypeId: 'COMMISSION',
+        referenceId: commission.id,
+        recipients,
+      });
+      await this.notificationsService.processQueue();
+    } catch (notifErr) {
+      this.logger.error(`Failed to send commission review notification for #${commission.id}:`, notifErr);
+    }
 
     return saved;
   }
