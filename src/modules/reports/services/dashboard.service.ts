@@ -318,27 +318,47 @@ export class DashboardService implements OnModuleInit {
     const leads = await this.leadRepo.find({ relations: { leadSource: true }, where: { isDeleted: false }, order: { createdAt: 'ASC' } });
     const sourceMap = new Map<string, number>();
     const monthMap = new Map<string, number>();
+    const sourceMonthMap = new Map<string, Map<string, number>>();
+    const allMonthsSet = new Set<string>();
 
     leads.forEach(l => {
       // Group by source name
-      const sourceName = l.leadSource?.sourceName || 'Unknown';
+      const sourceName = l.leadSource?.sourceName || 'Direct / Walk-in';
       sourceMap.set(sourceName, (sourceMap.get(sourceName) || 0) + 1);
 
       // Also keep monthly trend for timeline
       const date = new Date(l.createdAt);
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      allMonthsSet.add(monthKey);
       monthMap.set(monthKey, (monthMap.get(monthKey) || 0) + 1);
+
+      if (!sourceMonthMap.has(sourceName)) {
+        sourceMonthMap.set(sourceName, new Map<string, number>());
+      }
+      sourceMonthMap.get(sourceName)!.set(monthKey, (sourceMonthMap.get(sourceName)!.get(monthKey) || 0) + 1);
     });
 
+    const months = Array.from(allMonthsSet).sort();
+
     const leadAcquisitionTrend = Array.from(sourceMap.entries())
-      .map(([source, count]) => ({ source, count }))
+      .map(([source, count]) => {
+        const sm = sourceMonthMap.get(source) || new Map();
+        const monthlyData = months.map(m => ({
+          month: m,
+          count: sm.get(m) || 0,
+        }));
+        return { source, count, monthlyData };
+      })
       .sort((a, b) => b.count - a.count);
 
-    const monthlyTrend = Array.from(monthMap.entries()).map(([month, count]) => ({ month, count }));
+    const monthlyTrend = Array.from(monthMap.entries())
+      .map(([month, count]) => ({ month, count }))
+      .sort((a, b) => a.month.localeCompare(b.month));
 
     return {
       leadAcquisitionTrend,
       monthlyTrend,
+      months,
       conversionTrend: monthlyTrend.map(t => ({
         month: t.month,
         conversionRate: 15 + Math.floor(Math.random() * 5),

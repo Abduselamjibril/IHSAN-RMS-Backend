@@ -81,6 +81,54 @@ export class MarketingService {
     private readonly contractRepo: Repository<SalesContract>,
   ) {}
 
+  async onModuleInit() {
+    try {
+      const count = await this.campaignRepo.count();
+      if (count === 0) {
+        const ramadan = new MarketingCampaign();
+        ramadan.campaignCode = 'CAMP-2026-RAMADAN';
+        ramadan.campaignName = 'Ramadan Campaign';
+        ramadan.campaignType = 'SEASONAL';
+        ramadan.campaignObjective = 'Drive festive seasonal apartment and villa leads';
+        ramadan.startDate = new Date('2026-02-01');
+        ramadan.endDate = new Date('2026-11-30');
+        ramadan.budgetAmount = 50000;
+        ramadan.targetAudience = 'Families and High Net Worth Buyers';
+        ramadan.campaignStatus = 'ACTIVE';
+        await this.campaignRepo.save(ramadan);
+
+        const diaspora = new MarketingCampaign();
+        diaspora.campaignCode = 'CAMP-2026-DIASPORA';
+        diaspora.campaignName = 'Diaspora Premium Launch';
+        diaspora.campaignType = 'DIGITAL';
+        diaspora.campaignObjective = 'Diaspora international real estate acquisitions';
+        diaspora.startDate = new Date('2026-01-01');
+        diaspora.endDate = new Date('2026-12-31');
+        diaspora.budgetAmount = 35000;
+        diaspora.targetAudience = 'Overseas Ethiopian Community';
+        diaspora.campaignStatus = 'ACTIVE';
+        await this.campaignRepo.save(diaspora);
+      } else {
+        const hasRamadan = await this.campaignRepo.findOne({ where: { campaignName: 'Ramadan Campaign' } });
+        if (!hasRamadan) {
+          const ramadan = new MarketingCampaign();
+          ramadan.campaignCode = 'CAMP-2026-RAMADAN';
+          ramadan.campaignName = 'Ramadan Campaign';
+          ramadan.campaignType = 'SEASONAL';
+          ramadan.campaignObjective = 'Drive festive seasonal apartment and villa leads';
+          ramadan.startDate = new Date('2026-02-01');
+          ramadan.endDate = new Date('2026-11-30');
+          ramadan.budgetAmount = 50000;
+          ramadan.targetAudience = 'Families and High Net Worth Buyers';
+          ramadan.campaignStatus = 'ACTIVE';
+          await this.campaignRepo.save(ramadan);
+        }
+      }
+    } catch (err) {
+      console.error('Error seeding marketing campaigns:', err);
+    }
+  }
+
   // --- Auto Campaign Status Transition & Validation Helpers ---
   async checkAndUpdateCampaignStatuses(): Promise<void> {
     const now = new Date();
@@ -525,6 +573,20 @@ export class MarketingService {
       const conversionRate = totalLeads > 0 ? (convertedCount / totalLeads) * 100 : 0;
       const costPerLead = totalLeads > 0 ? totalExpense / totalLeads : 0;
 
+      const monthlyDataRaw = await this.leadRepo.createQueryBuilder('l')
+        .select("TO_CHAR(l.created_at, 'YYYY-MM')", 'period')
+        .addSelect('COUNT(l.id)', 'count')
+        .where('l.lead_source_id = :srcId', { srcId: src.id })
+        .andWhere('l.is_deleted = false')
+        .groupBy("TO_CHAR(l.created_at, 'YYYY-MM')")
+        .orderBy('period', 'ASC')
+        .getRawMany();
+
+      const monthlyTrend = monthlyDataRaw.map(m => ({
+        period: m.period,
+        count: Number(m.count) || 0,
+      }));
+
       result.push({
         id: src.id,
         sourceId: src.id,
@@ -539,6 +601,7 @@ export class MarketingService {
         costPerLead: Math.round(costPerLead * 100) / 100,
         cpl: Math.round(costPerLead * 100) / 100,
         revenueContribution,
+        monthlyTrend,
       });
     }
 
@@ -558,30 +621,35 @@ export class MarketingService {
     const totalLeads = await qbLeads.getCount();
 
     const qualifiedLeads = await this.leadRepo.createQueryBuilder('l')
-      .where('l.lead_status_id IN (2, 3, 4)')
-      .getCount();
+      .innerJoin('l.leadStatus', 'st')
+      .where('UPPER(st.status_name) = :status', { status: 'QUALIFIED' });
+    if (startDate) qualifiedLeads.andWhere('l.created_at >= :startDate', { startDate });
+    if (endDate) qualifiedLeads.andWhere('l.created_at <= :endDate', { endDate });
 
-    const convertedLeads = await this.leadRepo.createQueryBuilder('l')
-      .innerJoin('crm_customer', 'c', 'c.lead_id = l.id')
-      .getCount();
+    const qualifiedCount = await qualifiedLeads.getCount();
 
-    const conversionRate = totalLeads > 0 ? (convertedLeads / totalLeads) * 100 : 0;
+    const bookingRaw = await this.bookingRepo.createQueryBuilder('b')
+      .select('SUM(b.booking_amount)', 'revenue');
+    if (startDate) bookingRaw.andWhere('b.created_at >= :startDate', { startDate });
+    if (endDate) bookingRaw.andWhere('b.created_at <= :endDate', { endDate });
 
-    const expenses = await this.expenseRepo.find();
-    const marketingCost = expenses.reduce((sum, exp) => sum + Number(exp.expenseAmount), 0);
+    const revenueGenerated = Number((await bookingRaw.getRawOne())?.revenue || 0);
 
-    const bookings = await this.bookingRepo.createQueryBuilder('s')
-      .select('SUM(s.booking_amount)', 'revenue')
-      .getRawOne();
-    
-    const revenueGenerated = bookings?.revenue ? Number(bookings.revenue) : 0;
-    const roi = marketingCost > 0 ? ((revenueGenerated - marketingCost) / marketingCost) * 100 : 0;
+    const expenseRaw = await this.expenseRepo.createQueryBuilder('e')
+      .select('SUM(e.expense_amount)', 'cost');
+    if (startDate) expenseRaw.andWhere('e.expense_date >= :startDate', { startDate });
+    if (endDate) expenseRaw.andWhere('e.expense_date <= :endDate', { endDate });
+
+    const marketingCost = Number((await expenseRaw.getRawOne())?.cost || 0);
+
+    const conversionRate = totalLeads > 0 ? (qualifiedCount / totalLeads) * 100 : 0;
     const costPerLead = totalLeads > 0 ? marketingCost / totalLeads : 0;
+    const roi = marketingCost > 0 ? ((revenueGenerated - marketingCost) / marketingCost) * 100 : 0;
 
     return {
       totalLeads,
-      qualifiedLeads,
-      convertedLeads,
+      qualifiedLeads: qualifiedCount,
+      convertedLeads: qualifiedCount,
       conversionRate: Math.round(conversionRate * 100) / 100,
       marketingCost,
       costPerLead: Math.round(costPerLead * 100) / 100,
@@ -611,8 +679,39 @@ export class MarketingService {
       .orderBy('month', 'ASC')
       .getRawMany();
 
+    // Group monthly time-series matrix per source
+    const allMonthsSet = new Set<string>();
+    const allSourcesSet = new Set<string>();
+    const sourceMonthMap = new Map<string, Map<string, number>>();
+
+    sourceTrend.forEach((item: any) => {
+      if (item.month) allMonthsSet.add(item.month);
+      if (item.source) allSourcesSet.add(item.source);
+      if (!sourceMonthMap.has(item.source)) {
+        sourceMonthMap.set(item.source, new Map<string, number>());
+      }
+      sourceMonthMap.get(item.source)!.set(item.month, Number(item.count) || 0);
+    });
+
+    const months = Array.from(allMonthsSet).sort();
+    const sourceSeries = Array.from(allSourcesSet).map(sourceName => {
+      const sm = sourceMonthMap.get(sourceName) || new Map();
+      const monthlyData = months.map(m => ({
+        month: m,
+        count: sm.get(m) || 0,
+      }));
+      const total = monthlyData.reduce((acc, curr) => acc + curr.count, 0);
+      return {
+        source: sourceName,
+        total,
+        monthlyData,
+      };
+    }).sort((a, b) => b.total - a.total);
+
     return {
       sourceTrend,
+      sourceSeries,
+      months,
       campaigns,
       monthlyLeads,
     };
